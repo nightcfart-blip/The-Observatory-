@@ -2,23 +2,29 @@
 "use strict";
 
 /*
-  WATCH ARCHIVE — STEP 3
-  GROUPS, HIERARCHY & MANUAL GENRES
+  WATCH ARCHIVE — STEP 4
+  GROUP & PRODUCTION DETAIL PAGES
 
-  Source code defines defaults and behavior.
-  Personal data remains in browser storage.
+  Personal records:
+    localStorage
+
+  Uploaded image blobs:
+    IndexedDB
+
+  No external libraries or image hosting.
 */
 
 window.WATCH_DATA = {
 
   appName: "Watch Archive",
-  version: "3.0.0",
+  version: "4.0.0",
 
   schemaVersion: 1,
   storageKey: "watch_archive_v1",
 
+
   /* =====================================
-     DEFAULT ARCHIVE STATE
+     STORAGE & DEFAULTS
   ===================================== */
 
   defaults: {
@@ -41,6 +47,55 @@ window.WATCH_DATA = {
     }
   },
 
+
+  /* =====================================
+     BANNER IMAGE STORAGE
+
+     When selecting a photo from your phone:
+
+     1. The photo is decoded locally.
+     2. It is resized and compressed.
+     3. The resulting image is saved as
+        a Blob in IndexedDB.
+     4. The record stores its image key.
+
+     Older URL-based banners remain
+     readable for compatibility.
+  ===================================== */
+
+  images: {
+    databaseName: "watch_archive_images_v1",
+    databaseVersion: 1,
+    objectStore: "banners",
+
+    maximumInputMB: 35,
+
+    maximumWidth: 1920,
+    maximumHeight: 1080,
+
+    quality: 0.83,
+    preferredFormat: "image/jpeg",
+
+    thumbnailWidth: 600,
+    thumbnailHeight: 400,
+    thumbnailQuality: 0.78,
+
+    acceptedTypes: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/heif",
+      "image/avif"
+    ],
+
+    defaultPositionX: 50,
+    defaultPositionY: 35,
+
+    defaultOpacity: 87
+  },
+
+
   /* =====================================
      CAMERA
   ===================================== */
@@ -58,6 +113,7 @@ window.WATCH_DATA = {
     tapThreshold: 10,
     smoothness: 0.16
   },
+
 
   /* =====================================
      GRAPHICS
@@ -79,56 +135,52 @@ window.WATCH_DATA = {
     adaptiveQuality: true
   },
 
+
   /* =====================================
      STAR APPEARANCE
 
-     Appearance is derived from each
-     individual object's stable ID.
+     Groups intentionally feel much less
+     important than main navigation stars.
 
-     The renderer will apply unique:
-     - Core radius
-     - Brightness
-     - Color temperature
-     - Halo variation
-     - Diffraction spikes
-     - Asymmetry
-     - Twinkle speed
+     Additional seeded variation continues
+     to be applied by app.js.
   ===================================== */
 
   appearance: {
     navigationStars: {
-      radius: 4.6,
-      glow: 34,
-      color: [226, 230, 255]
+      radius: 4.7,
+      glow: 35,
+      color: [226,230,255]
     },
 
     groupStars: {
-      radius: 3.6,
-      glow: 26,
-      color: [207, 201, 255]
+      radius: 2.35,
+      glow: 17,
+      color: [197,192,244]
     },
 
     productionStars: {
-      radius: 2.9,
-      glow: 20,
-      color: [192, 206, 255]
+      radius: 2.75,
+      glow: 19,
+      color: [192,206,255]
     },
 
     seasonStars: {
-      radius: 2.2,
-      glow: 15,
-      color: [203, 205, 246]
+      radius: 2.1,
+      glow: 14,
+      color: [203,205,246]
     },
 
     episodeStars: {
       radius: 1.65,
       glow: 10,
-      color: [201, 211, 242]
+      color: [201,211,242]
     },
 
-    lineOpacity: .23,
-    activeLineOpacity: .64
+    lineOpacity: 0.23,
+    activeLineOpacity: 0.64
   },
+
 
   /* =====================================
      SEMANTIC ZOOM
@@ -151,13 +203,15 @@ window.WATCH_DATA = {
     }
   },
 
+
   /* =====================================
      MAIN CONSTELLATION
 
-     Cassiopeia-inspired, irregular.
-
-     History → Genre Creation
-     Rankings → Create & Edit
+     Library
+     Genre Creation
+     Create & Edit
+     Watchlist
+     Settings
   ===================================== */
 
   navigation: {
@@ -212,12 +266,13 @@ window.WATCH_DATA = {
     ],
 
     connections: [
-      ["library", "genres"],
-      ["genres", "create"],
-      ["create", "watchlist"],
-      ["watchlist", "settings"]
+      ["library","genres"],
+      ["genres","create"],
+      ["create","watchlist"],
+      ["watchlist","settings"]
     ]
   },
+
 
   /* =====================================
      GROUP PLACEMENT
@@ -231,13 +286,12 @@ window.WATCH_DATA = {
     seed: 73129
   },
 
+
   /* =====================================
-     DEMONSTRATION
+     ONE TEMPORARY DEMO GROUP
 
-     Kept for testing only until actual
-     group creation replaces it.
-
-     Not persisted in user storage.
+     No uploaded image needed.
+     It remains excluded from storage.
   ===================================== */
 
   demoGroups: [
@@ -249,33 +303,48 @@ window.WATCH_DATA = {
       x: 1380,
       y: -760,
 
+      mainGenreIds: [],
+      secondaryGenreIds: [],
+      notes: "",
+
       children: [
         {
           id: "demo-got",
           title: "Game of Thrones",
           type: "production",
 
+          mediaType: "TV Series",
+          releaseStart: "2011-04-17",
+          releaseEnd: "2019-05-19",
+          status: "Finished",
+
           children: [
             {
               id: "demo-got-s1",
               title: "Season 1",
               type: "season",
+              releaseStart: "2011-04-17",
+              status: "Finished",
 
               children: [
                 {
                   id: "demo-got-e1",
                   title: "Winter Is Coming",
                   type: "episode",
+                  duration: 62,
                   children: []
                 },
+
                 {
                   id: "demo-got-e2",
                   title: "The Kingsroad",
                   type: "episode",
+                  duration: 56,
                   children: []
                 }
               ]
             },
+
             {
               id: "demo-got-s2",
               title: "Season 2",
@@ -289,19 +358,89 @@ window.WATCH_DATA = {
           id: "demo-hotd",
           title: "House of the Dragon",
           type: "production",
+          mediaType: "TV Series",
+          releaseStart: "2022-08-21",
+          status: "Watching",
           children: []
         }
       ]
     }
   ],
 
+
+  /* =====================================
+     GROUP & SERIES PAGE DESIGN
+  ===================================== */
+
+  detailPages: {
+    group: {
+      typeLabel: "COLLECTION",
+      childType: "production",
+      childLayout: "horizontal",
+
+      showRating: true,
+      showMainGenres: true,
+      showSecondaryGenres: true,
+      showObservations: true,
+
+      showMediaType: false,
+      showAiringDates: false,
+      showPaperclip: false
+    },
+
+    production: {
+      typeLabel: "PRODUCTION",
+      childType: "season",
+      childLayout: "vertical",
+
+      showRating: true,
+      showMainGenres: true,
+      showSecondaryGenres: true,
+      showObservations: true,
+
+      showMediaType: true,
+      showAiringDates: true,
+      showPaperclip: true
+    }
+  },
+
+
+  /* =====================================
+     WATCHING STATUS & PAPERCLIP
+
+     These colors appear in the gemstone.
+  ===================================== */
+
+  statusVisuals: {
+    Watching: {
+      key: "watching",
+      color: "#416ce4"
+    },
+
+    Finished: {
+      key: "finished",
+      color: "#8b67dd"
+    },
+
+    Discontinued: {
+      key: "discontinued",
+      color: "#55c3cb"
+    },
+
+    Planned: {
+      key: "planned",
+      color: "#8d8fa6"
+    }
+  },
+
+
   /* =====================================
      ENTITY DEFINITIONS
 
-     These describe the supported records.
+     Stable IDs and parent links.
 
-     IDs remain stable during edits, moves,
-     renames and reordering.
+     Banner references are optional and
+     remain compatible with old records.
   ===================================== */
 
   entityTypes: {
@@ -312,14 +451,24 @@ window.WATCH_DATA = {
       parentType: null,
 
       fields: [
+        "id",
         "title",
+
         "banner",
+        "bannerImageId",
+        "bannerPositionX",
+        "bannerPositionY",
+
         "mainGenreIds",
         "secondaryGenreIds",
         "notes",
+
         "mapX",
         "mapY",
-        "order"
+        "order",
+
+        "createdAt",
+        "updatedAt"
       ]
     },
 
@@ -329,21 +478,34 @@ window.WATCH_DATA = {
       parentType: "group",
 
       fields: [
+        "id",
         "title",
         "groupId",
-        "mediaType",
+
         "banner",
+        "bannerImageId",
+        "bannerPositionX",
+        "bannerPositionY",
+
+        "mediaType",
         "mainGenreIds",
         "secondaryGenreIds",
-        "notes",
+
         "releaseStart",
         "releaseEnd",
+
         "status",
         "watchlist",
         "lastWatched",
+
+        "notes",
+
         "mapX",
         "mapY",
-        "order"
+        "order",
+
+        "createdAt",
+        "updatedAt"
       ]
     },
 
@@ -353,13 +515,18 @@ window.WATCH_DATA = {
       parentType: "production",
 
       fields: [
+        "id",
         "title",
         "productionId",
+
         "releaseStart",
         "releaseEnd",
         "status",
         "notes",
-        "order"
+        "order",
+
+        "createdAt",
+        "updatedAt"
       ]
     },
 
@@ -369,23 +536,26 @@ window.WATCH_DATA = {
       parentType: "season",
 
       fields: [
+        "id",
         "title",
         "seasonId",
+
         "duration",
         "notes",
         "watchedAt",
-        "order"
+        "order",
+
+        "rating",
+
+        "createdAt",
+        "updatedAt"
       ]
     }
   },
 
+
   /* =====================================
-     CUSTOM GENRES
-
-     No built-in genre presets.
-     Both collections start completely empty.
-
-     Genres can be referenced by their IDs.
+     MANUALLY CREATED GENRES
   ===================================== */
 
   genreTypes: {
@@ -400,8 +570,9 @@ window.WATCH_DATA = {
     }
   },
 
+
   /* =====================================
-     MEDIA TYPES
+     MEDIA FORMATS
   ===================================== */
 
   mediaTypes: [
@@ -422,8 +593,9 @@ window.WATCH_DATA = {
     "Planned"
   ],
 
+
   /* =====================================
-     COLLECTIONS
+     LIBRARY / WATCHLIST
   ===================================== */
 
   libraryViews: {
@@ -443,28 +615,38 @@ window.WATCH_DATA = {
   },
 
   sorting: [
-    { id: "alphabetical", title: "Alphabetical · A–Z" },
-    { id: "alphabeticalReverse", title: "Alphabetical · Z–A" },
-    { id: "highestRated", title: "Highest Rated" },
-    { id: "lowestRated", title: "Lowest Rated" },
-    { id: "lastWatched", title: "Last Watched" },
-    { id: "oldestAdded", title: "Oldest Added" },
-    { id: "newestAdded", title: "Newest Added" },
-    { id: "earliestRelease", title: "Earliest Release" },
-    { id: "latestRelease", title: "Latest Release" },
-    { id: "custom", title: "Custom Order" }
+    { id:"alphabetical", title:"Alphabetical · A–Z" },
+    { id:"alphabeticalReverse", title:"Alphabetical · Z–A" },
+    { id:"highestRated", title:"Highest Rated" },
+    { id:"lowestRated", title:"Lowest Rated" },
+    { id:"lastWatched", title:"Last Watched" },
+    { id:"oldestAdded", title:"Oldest Added" },
+    { id:"newestAdded", title:"Newest Added" },
+    { id:"earliestRelease", title:"Earliest Release" },
+    { id:"latestRelease", title:"Latest Release" },
+    { id:"custom", title:"Custom Order" }
   ],
 
+
   /* =====================================
-     RATINGS — RESERVED FOR STEP 6
+     RATING DISPLAY
+
+     The ten-star display is prepared here.
+
+     Full rating editing, animations,
+     automatic hierarchy averages and
+     percentages remain in Step 6.
   ===================================== */
 
   ratings: {
     minimum: 1,
     maximum: 10,
-    increment: .5,
+    increment: 0.5,
     decimalPlaces: 2,
-    ignoreUnrated: true
+    ignoreUnrated: true,
+
+    starCount: 10,
+    showUnratedStars: true
   }
 
 };
