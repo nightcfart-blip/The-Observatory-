@@ -1,275 +1,313 @@
+
 <!DOCTYPE html>
-
 <html lang="en">
-
 <head>
-
   <meta charset="UTF-8">
-
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-
-  <meta name="theme-color" content="#05060c">
-
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#030409">
   <meta name="color-scheme" content="dark">
 
-  <meta name="description" content="A private archive of everything I've watched.">
-
-  <title>Watch Archive</title>
+  <title>Watch Archive — The Constellation</title>
 
   <link rel="stylesheet" href="./style.css">
-
   <script src="./data.js" defer></script>
-
   <script src="./app.js" defer></script>
-
 </head>
 
 <body>
 
-  <!-- BACKGROUND -->
-
+  <!-- THE UNIVERSE -->
   <div class="universe" aria-hidden="true">
-
-    <div class="space-base"></div>
-
-    <div class="nebula nebula-one"></div>
-
-    <div class="nebula nebula-two"></div>
-
-    <div class="space-vignette"></div>
-
-    <canvas id="starfield"></canvas>
-
+    <div class="space-depth"></div>
+    <div class="cosmic-cloud cloud-one"></div>
+    <div class="cosmic-cloud cloud-two"></div>
+    <canvas id="stars"></canvas>
+    <div class="space-shading"></div>
   </div>
 
-  <!-- APPLICATION -->
+  <!-- MINIMAL FIXED CONTROLS -->
+  <header class="sky-header">
+    <a href="#home" class="wordmark">
+      <span class="wordmark-star">✧</span>
+      <span>THE ARCHIVE</span>
+    </a>
 
-  <div class="app-shell">
+    <span class="save-status" id="saveStatus"
+      role="status" aria-live="polite">
+      <span class="save-light"></span>
+      <span id="saveText">Local archive</span>
+    </span>
+  </header>
 
-    <!-- DESKTOP NAVIGATION -->
+  <main>
 
-    <aside class="sidebar">
+    <!-- THE CONSTELLATION -->
+    <section class="sky-landing" id="home"
+      aria-labelledby="landingTitle">
 
-      <a class="brand" href="#library" aria-label="Watch Archive home">
+      <div class="landing-intro">
+        <span class="overline">AN ARCHIVE OF STORIES</span>
+        <h1 id="landingTitle">A Universe of Your Own</h1>
+        <p>Every story leaves a star behind.</p>
+      </div>
 
-        <span class="brand-symbol">✧</span>
+      <div class="constellation" id="constellation">
 
-        <span class="brand-text">
+        <svg class="constellation-lines"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true">
 
-          <strong>WATCH ARCHIVE</strong>
+          <line data-link="library-groups"
+            x1="22" y1="32" x2="65" y2="18"/>
+          <line data-link="groups-rankings"
+            x1="65" y1="18" x2="80" y2="55"/>
+          <line data-link="rankings-history"
+            x1="80" y1="55" x2="34" y2="75"/>
+          <line data-link="history-settings"
+            x1="34" y1="75" x2="65" y2="89"/>
+          <line data-link="settings-library"
+            x1="65" y1="89" x2="22" y2="32"/>
+          <line data-link="library-history"
+            x1="22" y1="32" x2="34" y2="75"/>
 
-          <small>A private universe</small>
+        </svg>
 
-        </span>
-
-      </a>
-
-      <div class="sidebar-section-label">EXPLORE</div>
-
-      <nav class="side-navigation" aria-label="Main navigation">
-
-        <a href="#library" data-page="library" class="nav-link">
-
-          <span class="nav-symbol">◇</span>
-
-          <span>Library</span>
-
+        <a class="celestial-node node-library"
+          data-node="library" href="#library"
+          aria-label="Go to Library">
+          <span class="node-aura"></span>
+          <span class="node-core"></span>
+          <span class="node-name">Library</span>
         </a>
 
-        <a href="#groups" data-page="groups" class="nav-link">
-
-          <span class="nav-symbol">◈</span>
-
-          <span>Groups</span>
-
+        <a class="celestial-node node-groups"
+          data-node="groups" href="#groups"
+          aria-label="Go to Groups">
+          <span class="node-aura"></span>
+          <span class="node-core"></span>
+          <span class="node-name">Groups</span>
         </a>
 
-        <a href="#rankings" data-page="rankings" class="nav-link">
-
-          <span class="nav-symbol">✦</span>
-
-          <span>Rankings</span>
-
+        <a class="celestial-node node-rankings"
+          data-node="rankings" href="#rankings"
+          aria-label="Go to Rankings">
+          <span class="node-aura"></span>
+          <span class="node-core"></span>
+          <span class="node-name">Rankings</span>
         </a>
 
-        <a href="#history" data-page="history" class="nav-link">
-
-          <span class="nav-symbol">◷</span>
-
-          <span>History</span>
-
+        <a class="celestial-node node-history"
+          data-node="history" href="#history"
+          aria-label="Go to History">
+          <span class="node-aura"></span>
+          <span class="node-core"></span>
+          <span class="node-name">History</span>
         </a>
 
-      </nav>
-
-      <div class="sidebar-bottom">
-
-        <div class="sidebar-divider"></div>
-
-        <a href="#settings" data-page="settings" class="nav-link">
-
-          <span class="nav-symbol">⚙</span>
-
-          <span>Settings</span>
-
+        <a class="celestial-node node-settings"
+          data-node="settings" href="#settings"
+          aria-label="Go to Settings">
+          <span class="node-aura"></span>
+          <span class="node-core"></span>
+          <span class="node-name">Settings</span>
         </a>
-
-        <div class="sidebar-caption">
-
-          YOUR OWN LITTLE CORNER
-
-          <br>
-
-          OF THE UNIVERSE
-
-        </div>
 
       </div>
 
-    </aside>
+      <a href="#library" class="explore-prompt">
+        <span>EXPLORE THE ARCHIVE</span>
+        <span class="explore-arrow">↓</span>
+      </a>
+    </section>
 
-    <!-- MAIN CONTENT -->
+    <!-- LIBRARY -->
+    <section class="cosmic-section"
+      id="library" aria-labelledby="libraryTitle">
+      <div class="section-inner reveal">
+        <span class="section-index">01 / THE COLLECTION</span>
+        <h2 id="libraryTitle">Library</h2>
+        <p class="section-subtitle">
+          Every story has a place.
+        </p>
 
-    <div class="main-shell">
-
-      <header class="topbar">
-
-        <div class="breadcrumb" id="breadcrumb">
-
-          <span>Archive</span>
-
-          <span class="breadcrumb-divider">/</span>
-
-          <strong>Library</strong>
-
-        </div>
-
-        <div class="topbar-actions">
-
-          <span class="save-indicator" id="saveIndicator">
-
-            <span class="save-dot"></span>
-
-            Saved locally
-
+        <div class="open-content" id="libraryContent">
+          <div class="empty-illustration">✧</div>
+          <h3>A universe waiting to be written.</h3>
+          <p>
+            Your films, series, and other stories
+            will gather here.
+          </p>
+          <span class="coming-label">
+            LIBRARY COLLECTIONS · STEP 2
           </span>
+        </div>
+      </div>
+    </section>
 
-          <button
+    <!-- GROUPS -->
+    <section class="cosmic-section"
+      id="groups" aria-labelledby="groupsTitle">
+      <div class="section-inner reveal">
+        <span class="section-index">02 / CONNECTED WORLDS</span>
+        <h2 id="groupsTitle">Groups</h2>
+        <p class="section-subtitle">
+          Entire universes, gathered together.
+        </p>
 
-            type="button"
+        <div class="open-content" id="groupsContent">
+          <div class="empty-illustration">◇</div>
+          <h3>Worlds within worlds.</h3>
+          <p>
+            Connected stories, productions,
+            seasons, and episodes.
+          </p>
+          <span class="coming-label">
+            GROUP HIERARCHY · STEP 3
+          </span>
+        </div>
+      </div>
+    </section>
 
-            class="icon-button settings-shortcut"
+    <!-- RANKINGS -->
+    <section class="cosmic-section"
+      id="rankings" aria-labelledby="rankingsTitle">
+      <div class="section-inner reveal">
+        <span class="section-index">03 / EVALUATIONS</span>
+        <h2 id="rankingsTitle">Rankings</h2>
+        <p class="section-subtitle">
+          Not all stars shine equally.
+        </p>
 
-            id="settingsShortcut"
+        <div class="open-content" id="rankingsContent">
+          <div class="empty-illustration">✦</div>
+          <h3>The stories that stayed.</h3>
+          <p>
+            Your personal ratings and rankings
+            will take shape here.
+          </p>
+          <span class="coming-label">
+            RATING ENGINE · STEP 6
+          </span>
+        </div>
+      </div>
+    </section>
 
-            aria-label="Open settings"
+    <!-- HISTORY -->
+    <section class="cosmic-section"
+      id="history" aria-labelledby="historyTitle">
+      <div class="section-inner reveal">
+        <span class="section-index">04 / THROUGH TIME</span>
+        <h2 id="historyTitle">History</h2>
+        <p class="section-subtitle">
+          Every story leaves a trace.
+        </p>
 
-          >
+        <div class="open-content" id="historyContent">
+          <div class="empty-illustration">✺</div>
+          <h3>A journey through stories.</h3>
+          <p>
+            Your personal watching history
+            will eventually live here.
+          </p>
+          <span class="coming-label">
+            WATCH HISTORY · STEP 10
+          </span>
+        </div>
+      </div>
+    </section>
 
-            ⚙
+    <!-- SETTINGS -->
+    <section class="cosmic-section settings-section"
+      id="settings" aria-labelledby="settingsTitle">
 
-          </button>
+      <div class="section-inner reveal">
+        <span class="section-index">05 / YOUR UNIVERSE</span>
+        <h2 id="settingsTitle">Settings</h2>
+        <p class="section-subtitle">
+          Shape the atmosphere around you.
+        </p>
+
+        <div class="settings-content">
+
+          <div class="settings-group">
+            <h3>Atmosphere</h3>
+
+            <div class="setting">
+              <div>
+                <label for="density">Star density</label>
+                <p>How many stars fill your universe.</p>
+              </div>
+              <div class="setting-control">
+                <input id="density" type="range"
+                  min="10" max="100" step="5">
+                <output id="densityValue"></output>
+              </div>
+            </div>
+
+            <div class="setting">
+              <div>
+                <label for="brightness">Star brightness</label>
+                <p>The intensity of distant light.</p>
+              </div>
+              <div class="setting-control">
+                <input id="brightness" type="range"
+                  min="10" max="100" step="5">
+                <output id="brightnessValue"></output>
+              </div>
+            </div>
+
+            <div class="setting">
+              <div>
+                <label for="motion">Reduce motion</label>
+                <p>Still the universe and its animations.</p>
+              </div>
+              <input id="motion" type="checkbox"
+                class="motion-checkbox">
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Archive & Storage</h3>
+            <p class="storage-description">
+              Your information stays in this browser.
+              Export a backup regularly to protect it.
+            </p>
+
+            <div class="settings-actions">
+              <button id="exportButton" type="button">
+                Export archive ↗
+              </button>
+              <button id="importButton" type="button">
+                Import archive ↙
+              </button>
+            </div>
+          </div>
 
         </div>
+      </div>
+    </section>
 
-      </header>
+  </main>
 
-      <main class="main-content" id="mainContent" tabindex="-1">
+  <!-- BACK TO CONSTELLATION -->
+  <a href="#home" class="return-star"
+    id="returnStar" aria-label="Return to constellation">
+    ✧
+    <span>RETURN TO THE STARS</span>
+  </a>
 
-        <div id="pageContent" class="page-content"></div>
+  <div id="toast" class="toast"
+    role="status" aria-live="polite"></div>
 
-      </main>
+  <input type="file" id="importFile"
+    accept=".json,application/json" hidden>
 
-      <footer class="desktop-footer">
-
-        <span>AN ARCHIVE OF WORLDS, STORIES & MEMORIES</span>
-
-        <span id="footerVersion">V1.0</span>
-
-      </footer>
-
-    </div>
-
-  </div>
-
-  <!-- MOBILE NAVIGATION -->
-
-  <nav class="mobile-navigation" aria-label="Mobile navigation">
-
-    <a href="#library" data-page="library" class="mobile-link">
-
-      <span class="mobile-symbol">◇</span>
-
-      <span>Library</span>
-
-    </a>
-
-    <a href="#groups" data-page="groups" class="mobile-link">
-
-      <span class="mobile-symbol">◈</span>
-
-      <span>Groups</span>
-
-    </a>
-
-    <a href="#rankings" data-page="rankings" class="mobile-link">
-
-      <span class="mobile-symbol">✦</span>
-
-      <span>Ratings</span>
-
-    </a>
-
-    <a href="#history" data-page="history" class="mobile-link">
-
-      <span class="mobile-symbol">◷</span>
-
-      <span>History</span>
-
-    </a>
-
-    <a href="#settings" data-page="settings" class="mobile-link">
-
-      <span class="mobile-symbol">⚙</span>
-
-      <span>Settings</span>
-
-    </a>
-
-  </nav>
-
-  <!-- NOTIFICATIONS -->
-
-  <div
-
-    class="toast-container"
-
-    id="toastContainer"
-
-    role="status"
-
-    aria-live="polite"
-
-  ></div>
-
-  <!-- IMPORT -->
-
-  <input
-
-    type="file"
-
-    id="importFile"
-
-    accept=".json,application/json"
-
-    hidden
-
-  >
-
-  <!-- BACKDROP FOR FUTURE DIALOGS -->
-
-  <div id="modalRoot"></div>
+  <footer class="sky-footer">
+    <span>WATCH ARCHIVE</span>
+    <span>AN ENTIRE UNIVERSE, JUST FOR YOU</span>
+  </footer>
 
 </body>
-
 </html>
