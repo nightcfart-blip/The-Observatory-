@@ -1,621 +1,788 @@
 
 "use strict";
 
-/* =========================================================
-   WATCH ARCHIVE — STEP 2
-   THE COSMIC LIBRARY
+/* ==========================================================
+   WATCH ARCHIVE — STEP 3
+   GROUPS, HIERARCHY & MANUAL GENRES
 
-   Continuous world-space navigation
-   Screen-space labels
-   Smooth camera and semantic zoom
-   Procedural astronomical background
-   Production-only collection browsing
-   Mobile-first touch interactions
-========================================================= */
+   Four-level editable archive
+   Stable IDs and parent relationships
+   Genre creation and assignment
+   Natural constellation stars
+   Continuous free-moving camera
+   Local autosaving and JSON backups
+========================================================== */
 
 (() => {
   const DATA = window.WATCH_DATA;
   if (!DATA) {
-    console.error("Watch Archive: data.js is missing.");
+    console.error("Missing data.js");
     return;
   }
 
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
-  const clone = v => JSON.parse(JSON.stringify(v));
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const lerp = (a, b, t) => a + (b - a) * t;
-
-  const smoothstep = (a, b, value) => {
-    const t = clamp((value - a) / (b - a), 0, 1);
-    return t * t * (3 - 2 * t);
+  const clone = x => JSON.parse(JSON.stringify(x));
+  const clamp = (x,a,b) => Math.max(a,Math.min(b,x));
+  const lerp = (a,b,t) => a+(b-a)*t;
+  const smooth = (a,b,x) => {
+    const t = clamp((x-a)/(b-a),0,1);
+    return t*t*(3-2*t);
   };
 
   const viewport = $("#viewport");
   const starLayer = $("#starLayer");
-  const starCanvas = $("#constellationCanvas");
-  const nebulaCanvas = $("#nebulaCanvas");
-  const backgroundCanvas = $("#backgroundStars");
-
   const detailOverlay = $("#detailOverlay");
+  const editorOverlay = $("#editorOverlay");
   const searchOverlay = $("#searchOverlay");
+  const confirmOverlay = $("#confirmOverlay");
 
-  const cameraConfig = DATA.camera;
-  const MIN_ZOOM = cameraConfig.minZoom;
-  const MAX_ZOOM = cameraConfig.maxZoom;
-
-  const reducedMedia = matchMedia(
+  const reduceMedia = matchMedia(
     "(prefers-reduced-motion: reduce)"
   );
 
-  let state = readStorage();
+  const TYPES = ["group","production","season","episode"];
 
+  const COLLECTIONS = {
+    group: "groups",
+    production: "productions",
+    season: "seasons",
+    episode: "episodes"
+  };
+
+  const PARENT_KEYS = {
+    production: "groupId",
+    season: "productionId",
+    episode: "seasonId"
+  };
+
+  let state = loadState();
   let nodes = [];
-  let connections = [];
+  let edges = [];
   let nodeMap = new Map();
-  let selectedId = null;
-  let lastFocus = null;
-
-  let modalFocus = null;
-  let toastTimer = null;
-  let activeModal = null;
-
-  let currentCollection = null;
-  let collectionOptions = {
-    query: "",
-    sort: "alphabetical",
-    genre: "",
-    mediaType: "",
-    status: ""
-  };
-
-  const camera = {
-    x: 0,
-    y: 0,
-    zoom: cameraConfig.initialZoom
-  };
-
-  const targetCamera = { ...camera };
-
-  let cameraAnimating = false;
-  let cameraStart = null;
-  let cameraEnd = null;
-  let cameraStartTime = 0;
-  let cameraDuration = cameraConfig.travelDuration;
-
-  const pointers = new Map();
-  let gesture = null;
-  let suppressClickUntil = 0;
 
   let width = innerWidth;
   let height = innerHeight;
   let dpr = 1;
 
-  let canvasDirty = true;
-  let lastFrameTime = 0;
-  let animationFrame = null;
-  let running = false;
+  let selectedNode = null;
+  let focusedNode = null;
+  let currentOverlay = null;
+  let oldFocus = null;
+  let confirmCallback = null;
+  let toastTimer = 0;
 
-  /* =====================================================
-     1. STORAGE
-  ===================================================== */
+  let dirty = true;
+  let running = false;
+  let frameHandle = 0;
+  let lastFrame = 0;
+  let quality = 1;
+
+  const camera = {x:0,y:0,zoom:1};
+  let travel = null;
+
+  const pointers = new Map();
+  let gesture = null;
+  let blockClickUntil = 0;
+
+  let managerView = {type:null,id:null};
+  let activeCollection = "library";
+  let filters = {};
+
+  const canvas = $("#constellationCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const bgCanvas = $("#backgroundStars");
+  const bgCtx = bgCanvas.getContext("2d");
+
+  const nebulaCanvas = $("#nebulaCanvas");
+  const nebulaCtx = nebulaCanvas.getContext("2d");
+
+  let backgroundStars = [];
+  let nebulaTexture = null;
+
+  /* ======================================================
+     UTILITIES
+  ====================================================== */
+
+  function uid() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+
+    return "wa-" + Date.now().toString(36) + "-" +
+      Math.random().toString(36).slice(2,11);
+  }
+
+  function hash(value) {
+    let h = 2166136261;
+    for (const char of String(value)) {
+      h ^= char.charCodeAt(0);
+      h = Math.imul(h,16777619);
+    }
+    return h >>> 0;
+  }
+
+  function random(seed) {
+    let t = seed + 0x6D2B79F5;
+    t = Math.imul(t^(t>>>15),t|1);
+    t ^= t + Math.imul(t^(t>>>7),t|61);
+    return ((t^(t>>>14))>>>0)/4294967296;
+  }
+
+  function escapeHTML(value) {
+    return String(value ?? "").replace(
+      /[&<>"']/g,
+      c => ({
+        "&":"&amp;",
+        "<":"&lt;",
+        ">":"&gt;",
+        '"':"&quot;",
+        "'":"&#39;"
+      })[c]
+    );
+  }
+
+  function dateValue(value) {
+    if (!value) return 0;
+    const n = new Date(value).getTime();
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function safeNumber(value, fallback, min, max) {
+    if (value === "" || value == null) return fallback;
+    const n = Number(value);
+    return Number.isFinite(n) ? clamp(n,min,max) : fallback;
+  }
+
+  function titleOf(item) {
+    return String(item?.title || item?.name || "Untitled");
+  }
+
+  function notify(message) {
+    const el = $("#toast");
+    el.textContent = message;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"),3100);
+  }
+
+  function reduced() {
+    return state.settings.reduceMotion || reduceMedia.matches;
+  }
+
+  function applyMotion() {
+    document.body.classList.toggle("reduce-motion",reduced());
+    dirty = true;
+  }
+
+  /* ======================================================
+     STORAGE
+  ====================================================== */
 
   function initialState() {
-    const time = new Date().toISOString();
-
+    const now = new Date().toISOString();
     return {
       schemaVersion: DATA.schemaVersion,
-      createdAt: time,
-      updatedAt: time,
+      createdAt: now,
+      updatedAt: now,
       settings: clone(DATA.defaults.settings),
       archive: clone(DATA.defaults.archive)
     };
   }
 
-  function validNumber(value, fallback, min, max) {
-    if (value == null || value === "") return fallback;
-    const n = Number(value);
-    return Number.isFinite(n)
-      ? clamp(n, min, max)
-      : fallback;
-  }
-
   function normalizeState(input) {
     const base = initialState();
-    const settings = input?.settings || {};
-    const archive = input?.archive || {};
+    const a = input?.archive || {};
+    const s = input?.settings || {};
+
+    const archive = {...a};
+
+    for (const type of TYPES) {
+      const key = COLLECTIONS[type];
+      archive[key] = Array.isArray(a[key]) ? a[key] : [];
+    }
+
+    archive.genres = Array.isArray(a.genres) ? a.genres : [];
+    archive.secondaryGenres = Array.isArray(a.secondaryGenres)
+      ? a.secondaryGenres : [];
 
     return {
       ...base,
       ...(input || {}),
       schemaVersion: DATA.schemaVersion,
-
       settings: {
         ...base.settings,
-        ...settings,
-        starDensity: validNumber(
-          settings.starDensity, 75, 10, 100
-        ),
-        starBrightness: validNumber(
-          settings.starBrightness, 60, 10, 100
-        ),
-        nebulaIntensity: validNumber(
-          settings.nebulaIntensity, 65, 0, 100
-        ),
-        constellationGlow: validNumber(
-          settings.constellationGlow, 65, 0, 100
-        ),
-        reduceMotion: settings.reduceMotion === true
+        ...s,
+        starDensity: safeNumber(s.starDensity,75,10,100),
+        starBrightness: safeNumber(s.starBrightness,60,10,100),
+        nebulaIntensity: safeNumber(s.nebulaIntensity,65,0,100),
+        constellationGlow: safeNumber(s.constellationGlow,65,0,100),
+        reduceMotion: s.reduceMotion === true
       },
-
-      archive: {
-        ...archive,
-        groups: Array.isArray(archive.groups)
-          ? archive.groups : [],
-        productions: Array.isArray(archive.productions)
-          ? archive.productions : [],
-        seasons: Array.isArray(archive.seasons)
-          ? archive.seasons : [],
-        episodes: Array.isArray(archive.episodes)
-          ? archive.episodes : []
-      }
+      archive
     };
   }
 
-  function readStorage() {
+  function loadState() {
     try {
       const raw = localStorage.getItem(DATA.storageKey);
       if (!raw) return initialState();
+      const data = JSON.parse(raw);
 
-      const parsed = JSON.parse(raw);
-
-      if (parsed.schemaVersion !== DATA.schemaVersion) {
-        console.warn("Archive schema differs; saved data was not overwritten.");
+      if (data.schemaVersion !== DATA.schemaVersion) {
+        console.warn("Storage schema mismatch. Original data retained.");
         return initialState();
       }
 
-      return normalizeState(parsed);
-    } catch (error) {
-      console.error("Storage could not be read:", error);
+      return normalizeState(data);
+    } catch(e) {
+      console.error("Storage read failed",e);
       return initialState();
     }
   }
 
-  function saveStorage() {
-    const previousTime = state.updatedAt;
+  function saveState() {
     state.updatedAt = new Date().toISOString();
 
     try {
-      localStorage.setItem(
-        DATA.storageKey,
-        JSON.stringify(state)
-      );
+      localStorage.setItem(DATA.storageKey,JSON.stringify(state));
       return true;
-    } catch (error) {
-      state.updatedAt = previousTime;
-      console.error("Saving failed:", error);
-      showToast("Unable to save locally.");
+    } catch(e) {
+      console.error("Storage write failed",e);
+      notify("Saving failed. Export or free browser storage.");
       return false;
     }
   }
 
-  function reducedMotion() {
-    return state.settings.reduceMotion ||
-      reducedMedia.matches;
-  }
-
-  function applyMotionPreference() {
-    document.body.classList.toggle(
-      "reduce-motion",
-      reducedMotion()
-    );
-    canvasDirty = true;
-  }
-
-  function showToast(message) {
-    const toast = $("#toast");
-    toast.textContent = message;
-    toast.classList.add("show");
-
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(
-      () => toast.classList.remove("show"),
-      3100
-    );
-  }
-
-  function escapeHTML(value) {
-    return String(value ?? "").replace(/[&<>"']/g, ch => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    })[ch]);
-  }
-
-  function hashString(value) {
-    let h = 2166136261;
-
-    for (const ch of String(value)) {
-      h ^= ch.charCodeAt(0);
-      h = Math.imul(h, 16777619);
-    }
-
-    return h >>> 0;
-  }
-
-  function seeded(seed) {
-    let t = seed + 0x6D2B79F5;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  }
-
-  /* =====================================================
-     2. CAMERA COORDINATES
-  ===================================================== */
-
-  function worldToScreen(x, y) {
-    return {
-      x: width / 2 + (x - camera.x) * camera.zoom,
-      y: height / 2 + (y - camera.y) * camera.zoom
-    };
-  }
-
-  function screenToWorld(x, y) {
-    return {
-      x: camera.x + (x - width / 2) / camera.zoom,
-      y: camera.y + (y - height / 2) / camera.zoom
-    };
-  }
-
-  function stopCameraAnimation() {
-    cameraAnimating = false;
-    cameraStart = null;
-    cameraEnd = null;
-  }
-
-  function setCamera(x, y, zoom) {
-    camera.x = x;
-    camera.y = y;
-    camera.zoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
-    canvasDirty = true;
-  }
-
-  function moveCamera(target, duration) {
-    stopCameraAnimation();
-
-    const end = {
-      x: target.x,
-      y: target.y,
-      zoom: clamp(target.zoom, MIN_ZOOM, MAX_ZOOM)
-    };
-
-    if (reducedMotion()) {
-      setCamera(end.x, end.y, end.zoom);
-      return;
-    }
-
-    cameraStart = { ...camera };
-    cameraEnd = end;
-    cameraStartTime = performance.now();
-    cameraDuration = duration ?? cameraConfig.travelDuration;
-    cameraAnimating = true;
-  }
-
-  function stepCamera(now) {
-    if (!cameraAnimating) return;
-
-    const t = clamp(
-      (now - cameraStartTime) / cameraDuration,
-      0, 1
-    );
-
-    const e = t * t * (3 - 2 * t);
-
-    // Log-space interpolation avoids abrupt changes
-    // when travelling between different zoom scales.
-    const zoom = Math.exp(
-      lerp(
-        Math.log(cameraStart.zoom),
-        Math.log(cameraEnd.zoom),
-        e
-      )
-    );
-
-    setCamera(
-      lerp(cameraStart.x, cameraEnd.x, e),
-      lerp(cameraStart.y, cameraEnd.y, e),
-      zoom
-    );
-
-    if (t >= 1) {
-      cameraAnimating = false;
-      cameraStart = null;
-      cameraEnd = null;
-    }
-  }
-
-  function zoomAt(screenX, screenY, factor) {
-    stopCameraAnimation();
-
-    const anchor = screenToWorld(screenX, screenY);
-    const zoom = clamp(
-      camera.zoom * factor,
-      MIN_ZOOM,
-      MAX_ZOOM
-    );
-
-    const x = anchor.x -
-      (screenX - width / 2) / zoom;
-
-    const y = anchor.y -
-      (screenY - height / 2) / zoom;
-
-    setCamera(x, y, zoom);
-  }
-
-  function fitNavigation() {
-    const nav = nodes.filter(n => n.type === "navigation");
-    if (!nav.length) return { x: 0, y: 0, zoom: .8 };
-
-    const xs = nav.map(n => n.x);
-    const ys = nav.map(n => n.y);
-
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-
-    const scale = Math.min(
-      width * (width < 650 ? .79 : .70) / (maxX - minX + 110),
-      height * .51 / (maxY - minY + 130),
-      1.08
-    );
-
-    return {
-      x: (minX + maxX) / 2,
-      y: (minY + maxY) / 2,
-      zoom: clamp(scale, MIN_ZOOM, MAX_ZOOM)
-    };
-  }
-
-  function goHome() {
-    selectedId = null;
-    lastFocus = null;
-    moveCamera(fitNavigation(), 850);
-  }
-
-  function focusNode(node, requestedZoom = null) {
-    selectedId = node.id;
-    lastFocus = node;
-
-    const defaults = {
-      navigation: 1.4,
-      group: 2.1,
-      production: 4.4,
-      season: 9.2,
-      episode: 12
-    };
-
-    let zoom = requestedZoom ?? defaults[node.type] ?? 2;
-
-    // Keep navigation toward a parent gradual.
-    // A repeated tap can bring the camera closer.
-    if (Math.abs(camera.x - node.x) < 15 &&
-        Math.abs(camera.y - node.y) < 15 &&
-        camera.zoom >= zoom * .9) {
-      zoom = Math.min(MAX_ZOOM, camera.zoom * 1.35);
-    }
-
-    moveCamera({
-      x: node.x,
-      y: node.y,
-      zoom
-    }, cameraConfig.travelDuration);
-  }
-
-  /* =====================================================
-     3. THE UNIVERSE GRAPH
-  ===================================================== */
-
-  function createNode(source) {
-    return {
-      id: String(source.id),
-      title: String(source.title || source.name || "Untitled"),
-      type: source.type,
-      x: source.x,
-      y: source.y,
-      parentId: source.parentId || null,
-      depth: source.depth ?? 0,
-      demo: source.demo === true,
-      action: source.action || null,
-      magnitude: source.magnitude ?? 2.5,
-      data: source.data || null,
-
-      element: null,
-      visible: 0,
-      screenX: -10000,
-      screenY: -10000
-    };
-  }
-
-  function addNode(node) {
-    if (nodeMap.has(node.id)) return false;
-    nodeMap.set(node.id, node);
-    nodes.push(node);
+  function commitChange(message) {
+    if (!saveState()) return false;
+    rebuildUniverse();
+    dirty = true;
+    if (message) notify(message);
     return true;
   }
 
-  function childCollection(parent) {
-    if (parent.demo) {
-      return Array.isArray(parent.children)
-        ? parent.children
-        : [];
-    }
+  /* ======================================================
+     ENTITY RELATIONSHIPS
+  ====================================================== */
 
-    const collections = {
-      group: state.archive.productions,
-      production: state.archive.seasons,
-      season: state.archive.episodes
-    };
+  function collection(type) {
+    return state.archive[COLLECTIONS[type]] || [];
+  }
 
-    const keys = {
-      group: ["groupId", "parentId"],
-      production: ["productionId", "parentId"],
-      season: ["seasonId", "parentId"]
-    };
+  function getEntity(type,id) {
+    return collection(type).find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
 
-    const collection = collections[parent.type];
-    if (!collection) return [];
+  function childrenOf(type,id) {
+    const next = {
+      group:"production",
+      production:"season",
+      season:"episode"
+    }[type];
 
-    return collection.filter(item =>
-      keys[parent.type].some(key =>
-        item[key] != null &&
-        String(item[key]) === String(parent.id)
-      )
+    if (!next) return [];
+
+    const key = PARENT_KEYS[next];
+
+    return collection(next).filter(
+      item => String(item[key] || item.parentId || "") === String(id)
     );
   }
 
-  function childOffset(item, i, count, type) {
-    const radiusByType = {
-      production: 210,
-      season: 93,
-      episode: 36
-    };
+  function parentOf(type,item) {
+    if (type === "group") return null;
 
-    const base = radiusByType[type] || 120;
-    const seed = hashString(item.id || item.title || i);
+    const key = PARENT_KEYS[type];
+    const parentId = item[key] || item.parentId;
+    if (!parentId) return null;
 
-    const angle =
-      -Math.PI / 2 +
-      i * Math.PI * 2 / Math.max(count, 1) +
-      (seeded(seed) - .5) * .29;
+    const parentType = {
+      production:"group",
+      season:"production",
+      episode:"season"
+    }[type];
 
-    const r =
-      base *
-      (.86 + seeded(seed + 7) * .30) *
-      (count > 8 ? 1 + (count - 8) * .035 : 1);
+    const parent = getEntity(parentType,parentId);
+    return parent ? {type:parentType,item:parent} : null;
+  }
 
-    if (count === 1) {
-      return { x: base * .75, y: -base * .35 };
+  function nextOrder(type,parentId = null) {
+    let siblings = collection(type);
+
+    if (type !== "group") {
+      const key = PARENT_KEYS[type];
+      siblings = siblings.filter(
+        item => String(item[key] || "") === String(parentId || "")
+      );
     }
 
+    return siblings.reduce(
+      (max,item) => Math.max(max,Number(item.order) || 0),
+      -1
+    )+1;
+  }
+
+  function sortedChildren(type,parentId) {
+    return childrenOf(type,parentId).sort(
+      (a,b) => (a.order ?? 0)-(b.order ?? 0) ||
+        titleOf(a).localeCompare(titleOf(b))
+    );
+  }
+
+  function isFilm(item) {
+    return [
+      "Movie","Short Film","Special","Documentary"
+    ].includes(item.mediaType);
+  }
+
+  /* ======================================================
+     CUSTOM GENRES
+  ====================================================== */
+
+  function genreCollection(type) {
+    return state.archive[
+      type === "secondary" ? "secondaryGenres" : "genres"
+    ];
+  }
+
+  function genreName(id,type) {
+    return genreCollection(type).find(
+      g => g.id === id
+    )?.name || "";
+  }
+
+  function createGenre(type,name) {
+    const list = genreCollection(type);
+    const clean = name.trim();
+
+    if (!clean) return false;
+
+    if (list.some(g =>
+      g.name.toLowerCase() === clean.toLowerCase()
+    )) {
+      notify("That genre already exists.");
+      return false;
+    }
+
+    list.push({
+      id:uid(),
+      name:clean,
+      createdAt:new Date().toISOString()
+    });
+
+    return commitChange("Genre created.");
+  }
+
+  function renameGenre(type,id,name) {
+    const g = genreCollection(type).find(g => g.id === id);
+    const clean = name.trim();
+
+    if (!g || !clean) return;
+
+    if (genreCollection(type).some(other =>
+      other.id !== id &&
+      other.name.toLowerCase() === clean.toLowerCase()
+    )) {
+      notify("That genre name already exists.");
+      return;
+    }
+
+    g.name = clean;
+    commitChange("Genre renamed.");
+  }
+
+  function deleteGenre(type,id) {
+    const key = type === "secondary"
+      ? "secondaryGenreIds" : "mainGenreIds";
+
+    for (const recordType of ["group","production"]) {
+      for (const item of collection(recordType)) {
+        if (Array.isArray(item[key])) {
+          item[key] = item[key].filter(x => x !== id);
+        }
+      }
+    }
+
+    const list = genreCollection(type);
+    const index = list.findIndex(g => g.id === id);
+    if (index !== -1) list.splice(index,1);
+
+    commitChange("Genre deleted.");
+  }
+
+  /* ======================================================
+     ENTITY CREATION / UPDATING
+  ====================================================== */
+
+  function createEntity(type,values) {
+    const now = new Date().toISOString();
+
+    const item = {
+      id:uid(),
+      title:String(values.title || "").trim(),
+      createdAt:now,
+      updatedAt:now,
+      order:nextOrder(type,values[PARENT_KEYS[type]]),
+      notes:values.notes || ""
+    };
+
+    if (!item.title) {
+      notify("Please enter a title.");
+      return null;
+    }
+
+    Object.assign(item,values);
+
+    if (type === "group" || type === "production") {
+      item.mainGenreIds = values.mainGenreIds || [];
+      item.secondaryGenreIds = values.secondaryGenreIds || [];
+      item.banner = values.banner || "";
+    }
+
+    if (type === "production") {
+      item.groupId = values.groupId || null;
+      item.watchlist = values.watchlist === true;
+      item.mediaType = values.mediaType || "TV Series";
+      item.status = values.status || "Planned";
+    }
+
+    if (type === "season") {
+      if (!getEntity("production",values.productionId)) {
+        notify("Choose a valid production.");
+        return null;
+      }
+    }
+
+    if (type === "episode") {
+      if (!getEntity("season",values.seasonId)) {
+        notify("Choose a valid season.");
+        return null;
+      }
+
+      item.duration = Math.max(0,Number(values.duration) || 0);
+    }
+
+    if (type === "production" &&
+        item.groupId &&
+        !getEntity("group",item.groupId)) {
+      notify("Choose an existing group.");
+      return null;
+    }
+
+    collection(type).push(item);
+
+    if (!commitChange(`${type[0].toUpperCase()+type.slice(1)} created.`)) {
+      collection(type).pop();
+      return null;
+    }
+
+    return item;
+  }
+
+  function updateEntity(type,id,values) {
+    const item = getEntity(type,id);
+    if (!item) return false;
+
+    const clean = String(values.title || "").trim();
+    if (!clean) {
+      notify("Title cannot be empty.");
+      return false;
+    }
+
+    if (type === "production" && values.groupId &&
+        !getEntity("group",values.groupId)) {
+      notify("Invalid group selected.");
+      return false;
+    }
+
+    if (type === "season" &&
+        !getEntity("production",values.productionId)) {
+      notify("Invalid production selected.");
+      return false;
+    }
+
+    if (type === "episode" &&
+        !getEntity("season",values.seasonId)) {
+      notify("Invalid season selected.");
+      return false;
+    }
+
+    const oldParent = type === "group" ? null :
+      item[PARENT_KEYS[type]] || null;
+
+    const newParent = type === "group" ? null :
+      values[PARENT_KEYS[type]] || null;
+
+    if (oldParent !== newParent) {
+      values.order = nextOrder(type,newParent);
+      // Child coordinates are regenerated relative to the new parent.
+      delete item.mapX;
+      delete item.mapY;
+    }
+
+    Object.assign(item,values,{
+      id:item.id,
+      createdAt:item.createdAt,
+      updatedAt:new Date().toISOString()
+    });
+
+    return commitChange("Changes saved.");
+  }
+
+  function deleteEntity(type,id) {
+    const item = getEntity(type,id);
+    if (!item) return;
+
+    // Delete descendants from the bottom upwards.
+    for (const child of childrenOf(type,id)) {
+      const next = {
+        group:"production",
+        production:"season",
+        season:"episode"
+      }[type];
+
+      deleteEntitySilently(next,child.id);
+    }
+
+    const list = collection(type);
+    const index = list.findIndex(x => x.id === id);
+    if (index !== -1) list.splice(index,1);
+
+    commitChange("Entry deleted.");
+  }
+
+  function deleteEntitySilently(type,id) {
+    const next = {
+      group:"production",
+      production:"season",
+      season:"episode"
+    }[type];
+
+    if (next) {
+      for (const child of childrenOf(type,id)) {
+        deleteEntitySilently(next,child.id);
+      }
+    }
+
+    const list = collection(type);
+    const index = list.findIndex(x => x.id === id);
+    if (index !== -1) list.splice(index,1);
+  }
+
+  function moveOrder(type,id,direction) {
+    const item = getEntity(type,id);
+    if (!item) return;
+
+    const key = PARENT_KEYS[type];
+
+    const parentId = key ? item[key] || null : null;
+
+    const siblings = collection(type)
+      .filter(other =>
+        !key ||
+        String(other[key] || "") === String(parentId || "")
+      )
+      .sort((a,b) => (a.order ?? 0)-(b.order ?? 0));
+
+    const index = siblings.findIndex(x => x.id === id);
+    const otherIndex = index + direction;
+
+    if (otherIndex < 0 || otherIndex >= siblings.length) return;
+
+    [siblings[index],siblings[otherIndex]] =
+      [siblings[otherIndex],siblings[index]];
+
+    siblings.forEach((s,i) => {s.order = i;});
+
+    commitChange("Order updated.");
+  }
+
+  /* ======================================================
+     CONSTELLATION LAYOUT
+  ====================================================== */
+
+  function starProperties(id,type,magnitude=2.4) {
+    const seed = hash(id);
+
+    const warmer = random(seed+18);
+    const hue = warmer < .13
+      ? [255,219,199]
+      : warmer < .37
+        ? [226,235,255]
+        : warmer < .82
+          ? [188,207,255]
+          : [220,200,255];
+
     return {
-      x: Math.cos(angle) * r,
-      y: Math.sin(angle) * r
+      color:hue,
+      size:.72+random(seed+7)*.85,
+      halo:.6+random(seed+8)*1.35,
+      opacity:.68+random(seed+9)*.32,
+      spikes:random(seed+10) > .51,
+      spikeAngle:random(seed+11)*Math.PI,
+      spikeRatio:.55+random(seed+12)*1.1,
+      twinkleSpeed:.00022+random(seed+13)*.00055,
+      phase:random(seed+14)*Math.PI*2,
+      eccentricity:.82+random(seed+15)*.38,
+      magnitude
     };
   }
 
-  function addChildren(parentData, parentNode) {
+  function makeNode(obj) {
+    return {
+      ...obj,
+      id:String(obj.id),
+      title:String(obj.title || "Untitled"),
+      visible:0,
+      element:null,
+      sx:-9999,
+      sy:-9999,
+      appearance:starProperties(
+        obj.id,obj.type,obj.magnitude
+      )
+    };
+  }
+
+  function pushNode(node) {
+    if (nodeMap.has(node.id)) return;
+    nodes.push(node);
+    nodeMap.set(node.id,node);
+  }
+
+  function groupPosition(item,index) {
+    const x = Number(item.mapX ?? item.x);
+    const y = Number(item.mapY ?? item.y);
+
+    if ((item.mapX != null || item.x != null) &&
+        (item.mapY != null || item.y != null) &&
+        Number.isFinite(x) && Number.isFinite(y)) {
+      return {x,y};
+    }
+
+    const seed = hash(item.id);
+    const radius =
+      DATA.groupPlacement.initialRadius +
+      Math.sqrt(index)*DATA.groupPlacement.distanceGrowth;
+
+    const angle =
+      DATA.groupPlacement.angleOffset +
+      index*2.39996323 +
+      (random(seed+5)-.5)*.4;
+
+    return {
+      x:Math.cos(angle)*radius,
+      y:Math.sin(angle)*radius
+    };
+  }
+
+  function offsetPosition(item,index,count,type) {
+    const radii = {
+      production:215,
+      season:101,
+      episode:43
+    };
+
+    const seed = hash(item.id);
+    const base = radii[type] || 150;
+
+    const ring = Math.floor(index/9);
+    const ringIndex = index%9;
+    const ringCount = Math.min(9,count-ring*9);
+
+    const angle =
+      -Math.PI/2 +
+      ringIndex*Math.PI*2/Math.max(ringCount,2) +
+      (random(seed+2)-.5)*.27;
+
+    const radius = base*(1+ring*.9)*
+      (.75+random(seed+3)*.52);
+
+    return {
+      x:Math.cos(angle)*radius,
+      y:Math.sin(angle)*radius
+    };
+  }
+
+  function addTree(parentRecord,parentNode) {
     const nextType = {
-      group: "production",
-      production: "season",
-      season: "episode"
+      group:"production",
+      production:"season",
+      season:"episode"
     }[parentNode.type];
 
     if (!nextType) return;
 
-    const children = childCollection(parentData);
+    const children = sortedChildren(
+      parentNode.type,parentRecord.id
+    );
 
-    children.forEach((child, i) => {
-      const offset = childOffset(
-        child, i, children.length, nextType
+    if (parentNode.demo) {
+      const demoChildren = parentRecord.children || [];
+      children.length = 0;
+      children.push(...demoChildren);
+    }
+
+    children.forEach((child,index) => {
+      const offset = offsetPosition(
+        child,index,children.length,nextType
       );
 
-      const ownX = child.mapX != null
-        ? Number(child.mapX)
-        : NaN;
+      const customX = child.mapX != null
+        ? Number(child.mapX) : NaN;
+      const customY = child.mapY != null
+        ? Number(child.mapY) : NaN;
 
-      const ownY = child.mapY != null
-        ? Number(child.mapY)
-        : NaN;
-
-      const node = createNode({
-        id: child.id,
-        title: child.title || child.name,
-        type: nextType,
-        x: Number.isFinite(ownX)
-          ? ownX
-          : parentNode.x + offset.x,
-        y: Number.isFinite(ownY)
-          ? ownY
-          : parentNode.y + offset.y,
-        parentId: parentNode.id,
-        depth: parentNode.depth + 1,
-        demo: parentNode.demo,
-        magnitude: 2.3 + seeded(
-          hashString(child.id || String(i))
-        ) * 2.1,
-        data: child
+      const node = makeNode({
+        id:child.id,
+        title:titleOf(child),
+        type:nextType,
+        parentId:parentNode.id,
+        depth:parentNode.depth+1,
+        demo:parentNode.demo,
+        record:child,
+        x:Number.isFinite(customX)
+          ? customX : parentNode.x+offset.x,
+        y:Number.isFinite(customY)
+          ? customY : parentNode.y+offset.y,
+        magnitude:1.5+random(hash(child.id)+31)*3
       });
 
-      if (addNode(node)) addChildren(child, node);
+      pushNode(node);
+      addTree(child,node);
     });
   }
 
-  function groupPosition(group, index) {
-    const x = Number(group.mapX ?? group.x);
-    const y = Number(group.mapY ?? group.y);
-
-    if (
-      (group.mapX != null || group.x != null) &&
-      (group.mapY != null || group.y != null) &&
-      Number.isFinite(x) &&
-      Number.isFinite(y)
-    ) {
-      return { x, y };
-    }
-
-    const seed = hashString(group.id || String(index));
-    const angle =
-      DATA.groupPlacement.angleOffset +
-      index * 2.3999632297 +
-      (seeded(seed) - .5) * .2;
-
-    const radius =
-      DATA.groupPlacement.initialRadius +
-      Math.sqrt(index) * DATA.groupPlacement.distanceGrowth;
-
-    return {
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius
-    };
-  }
-
-  function naturalConnections(siblings) {
+  function naturalEdges(siblings) {
     if (siblings.length < 2) return [];
 
-    const attached = [siblings[0]];
-    const remaining = siblings.slice(1);
+    const linked = [siblings[0]];
+    const unlinked = siblings.slice(1);
     const results = [];
 
-    while (remaining.length) {
-      let best = null;
+    while (unlinked.length) {
+      let candidate = null;
 
-      for (const a of attached) {
-        for (const b of remaining) {
-          const distance = Math.hypot(
-            a.x - b.x, a.y - b.y
-          );
+      for (const a of linked) {
+        for (const b of unlinked) {
+          const d = Math.hypot(a.x-b.x,a.y-b.y);
 
-          if (!best || distance < best.distance) {
-            best = { a, b, distance };
+          if (!candidate || d < candidate.d) {
+            candidate = {a,b,d};
           }
         }
       }
 
-      if (!best) break;
+      if (!candidate) break;
 
       results.push({
-        a: best.a.id,
-        b: best.b.id,
-        type: "secondary"
+        from:candidate.a.id,
+        to:candidate.b.id
       });
 
-      attached.push(best.b);
-      remaining.splice(remaining.indexOf(best.b), 1);
+      linked.push(candidate.b);
+      unlinked.splice(unlinked.indexOf(candidate.b),1);
     }
 
     return results;
@@ -623,955 +790,1731 @@
 
   function rebuildUniverse() {
     nodes = [];
-    connections = [];
+    edges = [];
     nodeMap = new Map();
 
-    const navigationScale = width < 650 ? .58 : 1;
+    const scale = width < 650 ? .58 : 1;
 
-    DATA.navigation.nodes.forEach(item => {
-      addNode(createNode({
-        id: `nav-${item.id}`,
-        title: item.title,
-        type: "navigation",
-        x: item.x * navigationScale,
-        y: item.y * navigationScale,
-        action: item.action,
-        magnitude: item.magnitude,
-        depth: 0
+    for (const entry of DATA.navigation.nodes) {
+      pushNode(makeNode({
+        id:"nav-"+entry.id,
+        title:entry.title,
+        type:"navigation",
+        action:entry.action,
+        x:entry.x*scale,
+        y:entry.y*scale,
+        depth:0,
+        parentId:null,
+        magnitude:entry.magnitude
       }));
+    }
+
+    for (const [a,b] of DATA.navigation.connections) {
+      edges.push({
+        from:"nav-"+a,
+        to:"nav-"+b,
+        navigation:true
+      });
+    }
+
+    const actualGroups = [...collection("group")];
+
+    const allGroups = actualGroups.length
+      ? actualGroups
+      : [...DATA.demoGroups];
+
+    allGroups.forEach((group,i) => {
+      const p = groupPosition(group,i);
+
+      const n = makeNode({
+        id:group.id,
+        title:titleOf(group),
+        type:"group",
+        x:p.x,
+        y:p.y,
+        parentId:null,
+        depth:0,
+        demo:group.demo === true,
+        record:group,
+        magnitude:1.4+random(hash(group.id)+22)*1.9
+      });
+
+      pushNode(n);
+      addTree(group,n);
     });
 
-    DATA.navigation.connections.forEach(([a, b]) => {
-      connections.push({
-        a: `nav-${a}`,
-        b: `nav-${b}`,
-        type: "navigation"
+    // Standalone productions are independent map stars.
+    const standalone = collection("production")
+      .filter(p => !p.groupId && !p.parentId);
+
+    standalone.forEach((p,i) => {
+      const angle = i*2.39996323+1.6;
+      const radius = 1120+Math.sqrt(i)*360;
+
+      const x = Number.isFinite(Number(p.mapX))
+        && p.mapX != null
+          ? Number(p.mapX)
+          : Math.cos(angle)*radius;
+
+      const y = Number.isFinite(Number(p.mapY))
+        && p.mapY != null
+          ? Number(p.mapY)
+          : Math.sin(angle)*radius;
+
+      const n = makeNode({
+        id:p.id,
+        title:titleOf(p),
+        type:"production",
+        x,y,
+        standalone:true,
+        depth:0,
+        parentId:null,
+        record:p,
+        magnitude:1.5+random(hash(p.id))*2.5
       });
-    });
 
-    const groupRecords = [
-      ...DATA.demoGroups,
-      ...state.archive.groups
-    ];
-
-    groupRecords.forEach((group, index) => {
-      const position = groupPosition(group, index);
-
-      const node = createNode({
-        id: group.id,
-        title: group.title || group.name,
-        type: "group",
-        x: position.x,
-        y: position.y,
-        depth: 0,
-        magnitude: 2.1,
-        demo: group.demo === true,
-        data: group
-      });
-
-      if (addNode(node)) addChildren(group, node);
+      pushNode(n);
+      addTree(p,n);
     });
 
     const parents = new Set(
       nodes.filter(n => n.parentId).map(n => n.parentId)
     );
 
-    parents.forEach(parentId => {
-      const siblings = nodes.filter(
-        n => n.parentId === parentId
-      );
-      connections.push(...naturalConnections(siblings));
-    });
+    for (const parentId of parents) {
+      const siblings = nodes.filter(n => n.parentId === parentId);
+      edges.push(...naturalEdges(siblings));
+    }
 
-    rebuildHTMLStars();
-    canvasDirty = true;
+    buildStarButtons();
+    dirty = true;
   }
 
-  /* =====================================================
-     4. SCREEN-SPACE LABELS
+  /* ======================================================
+     CAMERA
+  ====================================================== */
 
-     These HTML buttons are never scaled by CSS.
-     Their positions are recalculated from the camera.
-  ===================================================== */
+  function worldToScreen(x,y) {
+    return {
+      x:width/2+(x-camera.x)*camera.zoom,
+      y:height/2+(y-camera.y)*camera.zoom
+    };
+  }
 
-  function rebuildHTMLStars() {
+  function screenToWorld(x,y) {
+    return {
+      x:camera.x+(x-width/2)/camera.zoom,
+      y:camera.y+(y-height/2)/camera.zoom
+    };
+  }
+
+  function stopTravel() {travel=null;}
+
+  function setCamera(x,y,zoom) {
+    camera.x=x;
+    camera.y=y;
+    camera.zoom=clamp(zoom,DATA.camera.minZoom,DATA.camera.maxZoom);
+    dirty=true;
+  }
+
+  function animateTo(target,duration=850) {
+    stopTravel();
+
+    if (reduced()) {
+      setCamera(target.x,target.y,target.zoom);
+      return;
+    }
+
+    travel = {
+      start:{...camera},
+      end:target,
+      startTime:performance.now(),
+      duration
+    };
+  }
+
+  function updateTravel(time) {
+    if (!travel) return;
+
+    const t=clamp(
+      (time-travel.startTime)/travel.duration,0,1
+    );
+
+    const e=t*t*(3-2*t);
+
+    const z=Math.exp(lerp(
+      Math.log(travel.start.zoom),
+      Math.log(clamp(
+        travel.end.zoom,
+        DATA.camera.minZoom,
+        DATA.camera.maxZoom
+      )),
+      e
+    ));
+
+    setCamera(
+      lerp(travel.start.x,travel.end.x,e),
+      lerp(travel.start.y,travel.end.y,e),
+      z
+    );
+
+    if (t>=1) travel=null;
+  }
+
+  function zoomAt(x,y,factor) {
+    stopTravel();
+
+    const anchor=screenToWorld(x,y);
+    const zoom=clamp(
+      camera.zoom*factor,
+      DATA.camera.minZoom,
+      DATA.camera.maxZoom
+    );
+
+    setCamera(
+      anchor.x-(x-width/2)/zoom,
+      anchor.y-(y-height/2)/zoom,
+      zoom
+    );
+  }
+
+  function homeCamera() {
+    const nav = nodes.filter(n => n.type === "navigation");
+
+    if (!nav.length) return {x:0,y:0,zoom:1};
+
+    const xs=nav.map(n=>n.x);
+    const ys=nav.map(n=>n.y);
+
+    const minX=Math.min(...xs),maxX=Math.max(...xs);
+    const minY=Math.min(...ys),maxY=Math.max(...ys);
+
+    const zoom=clamp(Math.min(
+      width*(width<650?.80:.72)/(maxX-minX+110),
+      height*.51/(maxY-minY+130),
+      1.1
+    ),DATA.camera.minZoom,1.1);
+
+    return {
+      x:(minX+maxX)/2,
+      y:(minY+maxY)/2,
+      zoom
+    };
+  }
+
+  function goHome() {
+    focusedNode=null;
+    selectedNode=null;
+    animateTo(homeCamera(),800);
+  }
+
+  function focusNode(node) {
+    focusedNode=node;
+    selectedNode=node.id;
+
+    const targets={
+      navigation:1.35,
+      group:2.1,
+      production:4.5,
+      season:9.4,
+      episode:13
+    };
+
+    let zoom=targets[node.type] || 2;
+
+    if (
+      Math.hypot(camera.x-node.x,camera.y-node.y)<12 &&
+      camera.zoom>=zoom*.90
+    ) {
+      zoom=Math.min(DATA.camera.maxZoom,camera.zoom*1.3);
+    }
+
+    animateTo({
+      x:node.x,
+      y:node.y,
+      zoom
+    },950);
+  }
+
+  /* ======================================================
+     SCREEN SPACE STAR LABELS
+  ====================================================== */
+
+  function buildStarButtons() {
     starLayer.replaceChildren();
 
     for (const node of nodes) {
-      const button = document.createElement("button");
+      const el=document.createElement("button");
 
-      button.type = "button";
-      button.className =
-        `celestial-star ${node.type}-star` +
-        (node.demo ? " demo-star" : "");
+      el.type="button";
+      el.className=
+        `celestial-star ${node.type}-star`+
+        (node.demo?" demo-star":"");
 
-      button.setAttribute(
-        "aria-label", `Explore ${node.title}`
+      el.setAttribute("aria-label","Explore "+node.title);
+
+      const hit=document.createElement("span");
+      hit.className="star-touch-area";
+
+      const label=document.createElement("span");
+      label.className="star-label";
+      label.textContent=node.title;
+
+      const variation=node.appearance;
+
+      label.style.setProperty(
+        "--label-distance",
+        `${23+Math.round(variation.size*5)}px`
       );
 
-      const touch = document.createElement("span");
-      touch.className = "star-touch-area";
+      el.append(hit,label);
 
-      const label = document.createElement("span");
-      label.className = "star-label";
-      label.textContent = node.title;
-
-      button.append(touch, label);
-
-      button.addEventListener("click", event => {
+      el.addEventListener("click",event=>{
         event.stopPropagation();
-
-        if (performance.now() < suppressClickUntil) {
-          return;
-        }
-
+        if (performance.now()<blockClickUntil) return;
         selectStar(node);
       });
 
-      button.addEventListener("pointerenter", () => {
-        selectedId = node.id;
-        canvasDirty = true;
+      el.addEventListener("pointerenter",()=>{
+        selectedNode=node.id;
+        dirty=true;
       });
 
-      button.addEventListener("pointerleave", () => {
-        if (selectedId === node.id) {
-          selectedId = lastFocus?.id || null;
-          canvasDirty = true;
-        }
+      el.addEventListener("pointerleave",()=>{
+        selectedNode=focusedNode?.id || null;
+        dirty=true;
       });
 
-      button.addEventListener("focus", () => {
-        selectedId = node.id;
-        canvasDirty = true;
+      el.addEventListener("focus",()=>{
+        selectedNode=node.id;
+        dirty=true;
       });
 
-      node.element = button;
-      starLayer.appendChild(button);
+      node.element=el;
+      starLayer.appendChild(el);
     }
-  }
-
-  function threshold(node) {
-    if (node.type === "production") {
-      return DATA.semanticZoom.productions;
-    }
-
-    if (node.type === "season") {
-      return DATA.semanticZoom.seasons;
-    }
-
-    if (node.type === "episode") {
-      return DATA.semanticZoom.episodes;
-    }
-
-    return null;
   }
 
   function visibility(node) {
-    const rule = threshold(node);
-    if (!rule) return 1;
+    if (node.type==="navigation" ||
+        node.type==="group" ||
+        node.standalone) return 1;
 
-    let value = smoothstep(
-      rule.start, rule.full, camera.zoom
+    const config={
+      production:DATA.semanticZoom.productions,
+      season:DATA.semanticZoom.seasons,
+      episode:DATA.semanticZoom.episodes
+    }[node.type];
+
+    if (!config) return 1;
+
+    let alpha=smooth(
+      config.start,
+      config.full,
+      camera.zoom
     );
 
-    // Spatial gating keeps unrelated constellations
-    // from all appearing simultaneously.
-    const parent = nodeMap.get(node.parentId);
+    const parent=nodeMap.get(node.parentId);
 
     if (parent) {
-      const distance = Math.hypot(
-        camera.x - parent.x,
-        camera.y - parent.y
-      ) * camera.zoom;
+      const d=Math.hypot(
+        camera.x-parent.x,
+        camera.y-parent.y
+      )*camera.zoom;
 
-      const reach = node.type === "production"
-        ? Math.max(width, height) * 1.4
-        : Math.max(width, height) * 1.15;
-
-      value *= 1 - smoothstep(
-        reach * .8, reach * 1.5, distance
-      );
+      const range=Math.max(width,height)*1.5;
+      alpha*=1-smooth(range*.75,range*1.6,d);
     }
 
-    return clamp(value, 0, 1);
+    return clamp(alpha,0,1);
   }
 
-  function updateStarPositions() {
-    const margin = 100;
+  function positionButtons() {
+    for (const n of nodes) {
+      const p=worldToScreen(n.x,n.y);
+      n.sx=p.x;
+      n.sy=p.y;
+      n.visible=visibility(n);
 
-    for (const node of nodes) {
-      const p = worldToScreen(node.x, node.y);
+      const onScreen=
+        p.x>-130 && p.x<width+130 &&
+        p.y>-130 && p.y<height+130;
 
-      node.screenX = p.x;
-      node.screenY = p.y;
+      const shown=onScreen && n.visible>.025;
 
-      const alpha = visibility(node);
-      node.visible = alpha;
+      n.element.classList.toggle("is-hidden",!shown);
 
-      const onScreen =
-        p.x > -margin &&
-        p.x < width + margin &&
-        p.y > -margin &&
-        p.y < height + margin;
-
-      const display = onScreen && alpha > .02;
-
-      node.element.classList.toggle(
-        "is-hidden", !display
-      );
-
-      if (!display) {
-        node.element.tabIndex = -1;
+      if (!shown) {
+        n.element.tabIndex=-1;
         continue;
       }
 
-      node.element.style.left = `${p.x}px`;
-      node.element.style.top = `${p.y}px`;
-      node.element.style.setProperty(
+      n.element.style.left=p.x+"px";
+      n.element.style.top=p.y+"px";
+      n.element.style.setProperty(
         "--visibility",
-        alpha.toFixed(3)
+        n.visible.toFixed(3)
       );
 
-      node.element.disabled = alpha < .68;
-      node.element.tabIndex = alpha >= .68 ? 0 : -1;
-      node.element.classList.toggle(
-        "selected", selectedId === node.id
+      n.element.disabled=n.visible<.67;
+      n.element.tabIndex=n.visible>=.67?0:-1;
+
+      n.element.classList.toggle(
+        "selected",selectedNode===n.id
       );
     }
   }
 
-  /* =====================================================
-     5. HIGH-DPI CANVAS HELPERS
-  ===================================================== */
+  /* ======================================================
+     REALISTIC STAR RENDERING
+  ====================================================== */
 
-  function resizeCanvas(canvas, context, ratio) {
-    canvas.width = Math.round(width * ratio);
-    canvas.height = Math.round(height * ratio);
+  function drawStar(n,time) {
+    if (n.visible<.015) return;
 
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  }
+    const x=n.sx,y=n.sy;
+    if (x<-100||x>width+100||y<-100||y>height+100) return;
 
-  function resizeAllCanvases() {
-    width = innerWidth;
-    height = innerHeight;
+    const styles={
+      navigation:DATA.appearance.navigationStars,
+      group:DATA.appearance.groupStars,
+      production:DATA.appearance.productionStars,
+      season:DATA.appearance.seasonStars,
+      episode:DATA.appearance.episodeStars
+    };
 
-    dpr = Math.min(
-      devicePixelRatio || 1,
-      DATA.graphics.maxPixelRatio
+    const style=styles[n.type];
+    if (!style) return;
+
+    const v=n.appearance;
+    const [r,g,b]=v.color;
+
+    const selected=selectedNode===n.id;
+
+    const alpha=n.visible*v.opacity;
+
+    const pulse=reduced()?1:
+      1+Math.sin(time*v.twinkleSpeed+v.phase)*.055;
+
+    const radius=style.radius*v.size*pulse;
+    const glow=style.glow*v.halo*
+      (state.settings.constellationGlow/65)*
+      (selected?1.5:1);
+
+    const outer=ctx.createRadialGradient(
+      x,y,0,x,y,glow
     );
 
-    resizeCanvas(
-      starCanvas,
-      constellationRenderer.ctx,
-      dpr
+    outer.addColorStop(
+      0,`rgba(${r},${g},${b},${alpha*.24})`
+    );
+    outer.addColorStop(
+      .2,`rgba(${r},${g},${b},${alpha*.14})`
+    );
+    outer.addColorStop(
+      .6,`rgba(${r},${g},${b},${alpha*.025})`
+    );
+    outer.addColorStop(1,"rgba(0,0,0,0)");
+
+    ctx.save();
+
+    // Slight elliptical imperfection.
+    ctx.translate(x,y);
+    ctx.rotate(v.spikeAngle*.15);
+    ctx.scale(1,v.eccentricity);
+
+    ctx.fillStyle=outer;
+    ctx.beginPath();
+    // Gradient is already in screen coordinates,
+    // so draw glow in untransformed space below.
+    ctx.restore();
+
+    ctx.fillStyle=outer;
+    ctx.beginPath();
+    ctx.arc(x,y,glow,0,Math.PI*2);
+    ctx.fill();
+
+    const core=ctx.createRadialGradient(
+      x,y,0,x,y,radius*2.8
     );
 
-    resizeCanvas(
-      backgroundCanvas,
-      backgroundRenderer.ctx,
-      dpr
+    core.addColorStop(
+      0,`rgba(255,255,255,${alpha})`
     );
-
-    resizeCanvas(
-      nebulaCanvas,
-      nebulaRenderer.ctx,
-      Math.min(dpr, 1)
+    core.addColorStop(
+      .16,`rgba(${r},${g},${b},${alpha})`
     );
+    core.addColorStop(
+      .5,`rgba(${r},${g},${b},${alpha*.35})`
+    );
+    core.addColorStop(1,"rgba(0,0,0,0)");
 
-    backgroundRenderer.rebuild();
-    nebulaRenderer.resize();
+    ctx.fillStyle=core;
+    ctx.beginPath();
+    ctx.ellipse(
+      x,y,radius*2.8,
+      radius*2.8*v.eccentricity,
+      v.spikeAngle,0,Math.PI*2
+    );
+    ctx.fill();
 
-    canvasDirty = true;
-  }
+    // Only some stars have diffraction spikes.
+    if (v.spikes && (radius>2.1 || selected)) {
+      ctx.save();
+      ctx.translate(x,y);
+      ctx.rotate(v.spikeAngle);
 
-  /* =====================================================
-     6. REALISTIC CONSTELLATION RENDERER
+      const length=radius*(
+        selected?7.5:4.5
+      )*v.spikeRatio;
 
-     All glow and line effects are drawn at the
-     displayed screen resolution, without scaling text.
-  ===================================================== */
+      ctx.globalAlpha=alpha*.5;
 
-  class ConstellationRenderer {
-    constructor(canvas) {
-      this.canvas = canvas;
-      this.ctx = canvas.getContext("2d");
-    }
+      let grad=ctx.createLinearGradient(-length,0,length,0);
+      grad.addColorStop(0,"transparent");
+      grad.addColorStop(.5,`rgba(${r},${g},${b},.75)`);
+      grad.addColorStop(1,"transparent");
 
-    drawLine(a, b, alpha, highlighted) {
-      const ctx = this.ctx;
-
+      ctx.strokeStyle=grad;
+      ctx.lineWidth=.55;
       ctx.beginPath();
-      ctx.moveTo(a.screenX, a.screenY);
-      ctx.lineTo(b.screenX, b.screenY);
-
-      ctx.lineWidth = highlighted ? 1.1 : .66;
-
-      ctx.strokeStyle = highlighted
-        ? `rgba(204,199,255,${alpha * .75})`
-        : `rgba(160,174,232,${alpha * .37})`;
-
+      ctx.moveTo(-length,0);
+      ctx.lineTo(length,0);
       ctx.stroke();
 
-      if (highlighted) {
-        ctx.save();
-        ctx.shadowBlur = 9;
-        ctx.shadowColor = "rgba(167,155,255,.55)";
-        ctx.stroke();
-        ctx.restore();
-      }
-    }
+      const vertical=length*(.4+v.eccentricity*.5);
 
-    drawStar(node, time) {
-      const ctx = this.ctx;
+      grad=ctx.createLinearGradient(0,-vertical,0,vertical);
+      grad.addColorStop(0,"transparent");
+      grad.addColorStop(.5,`rgba(${r},${g},${b},.68)`);
+      grad.addColorStop(1,"transparent");
 
-      const { screenX: x, screenY: y } = node;
-      const alpha = node.visible;
-
-      if (alpha <= .01) return;
-
-      const styles = {
-        navigation: DATA.appearance.navigationStars,
-        group: DATA.appearance.groupStars,
-        production: DATA.appearance.productionStars,
-        season: DATA.appearance.seasonStars,
-        episode: DATA.appearance.episodeStars
-      };
-
-      const style = styles[node.type];
-      if (!style) return;
-
-      const [r, g, b] = style.color;
-
-      const magnitudeBoost =
-        clamp((4 - node.magnitude) * .12 + 1, .72, 1.35);
-
-      const radius = style.radius * magnitudeBoost;
-
-      const active = selectedId === node.id;
-      const glowMultiplier =
-        state.settings.constellationGlow / 65;
-
-      const pulse = reducedMotion()
-        ? 1
-        : 1 + Math.sin(
-            time * .0012 + hashString(node.id)
-          ) * .05;
-
-      const outerRadius =
-        style.glow * glowMultiplier *
-        (active ? 1.55 : 1) * pulse;
-
-      // Low-intensity stellar halo.
-      const halo = ctx.createRadialGradient(
-        x, y, 0,
-        x, y, outerRadius
-      );
-
-      halo.addColorStop(
-        0, `rgba(${r},${g},${b},${alpha * .27})`
-      );
-
-      halo.addColorStop(
-        .18, `rgba(${r},${g},${b},${alpha * .14})`
-      );
-
-      halo.addColorStop(
-        .52, `rgba(${r},${g},${b},${alpha * .035})`
-      );
-
-      halo.addColorStop(1, "rgba(0,0,0,0)");
-
-      ctx.fillStyle = halo;
+      ctx.strokeStyle=grad;
       ctx.beginPath();
-      ctx.arc(x, y, outerRadius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Bright stellar core.
-      const core = ctx.createRadialGradient(
-        x, y, 0,
-        x, y, radius * 2.2
-      );
-
-      core.addColorStop(0, `rgba(255,255,255,${alpha})`);
-      core.addColorStop(
-        .22, `rgba(${r},${g},${b},${alpha * .95})`
-      );
-      core.addColorStop(
-        .55, `rgba(${r},${g},${b},${alpha * .36})`
-      );
-      core.addColorStop(1, "rgba(0,0,0,0)");
-
-      ctx.fillStyle = core;
-      ctx.beginPath();
-      ctx.arc(x, y, radius * 2.2, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Subtle diffraction spikes on bright stars.
-      if (node.type === "navigation" ||
-          (node.type === "group" && active)) {
-        const length = radius * (active ? 6.8 : 5.0);
-
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.globalAlpha = alpha * .55;
-
-        const rayH = ctx.createLinearGradient(
-          -length, 0, length, 0
-        );
-        rayH.addColorStop(0, "transparent");
-        rayH.addColorStop(.5, "rgba(224,229,255,.75)");
-        rayH.addColorStop(1, "transparent");
-
-        ctx.strokeStyle = rayH;
-        ctx.lineWidth = .65;
-        ctx.beginPath();
-        ctx.moveTo(-length, 0);
-        ctx.lineTo(length, 0);
-        ctx.stroke();
-
-        const rayV = ctx.createLinearGradient(
-          0, -length, 0, length
-        );
-        rayV.addColorStop(0, "transparent");
-        rayV.addColorStop(.5, "rgba(224,229,255,.75)");
-        rayV.addColorStop(1, "transparent");
-
-        ctx.strokeStyle = rayV;
-        ctx.beginPath();
-        ctx.moveTo(0, -length);
-        ctx.lineTo(0, length);
-        ctx.stroke();
-
-        ctx.restore();
-      }
-    }
-
-    draw(time) {
-      const ctx = this.ctx;
-      ctx.clearRect(0, 0, width, height);
-
-      // Draw lines first so the stars cover endpoints.
-      for (const line of connections) {
-        const a = nodeMap.get(line.a);
-        const b = nodeMap.get(line.b);
-
-        if (!a || !b) continue;
-
-        const alpha = Math.min(a.visible, b.visible);
-        if (alpha < .015) continue;
-
-        const margin = 65;
-
-        if (
-          Math.max(a.screenX, b.screenX) < -margin ||
-          Math.min(a.screenX, b.screenX) > width + margin ||
-          Math.max(a.screenY, b.screenY) < -margin ||
-          Math.min(a.screenY, b.screenY) > height + margin
-        ) continue;
-
-        const highlighted =
-          selectedId === line.a ||
-          selectedId === line.b;
-
-        this.drawLine(a, b, alpha, highlighted);
-      }
-
-      for (const node of nodes) {
-        if (node.visible <= .015) continue;
-
-        if (
-          node.screenX < -90 ||
-          node.screenX > width + 90 ||
-          node.screenY < -90 ||
-          node.screenY > height + 90
-        ) continue;
-
-        this.drawStar(node, time);
-      }
-    }
-  }
-
-  /* =====================================================
-     7. DEEP-SPACE BACKGROUND STARS
-
-     Several different populations create the impression
-     of distant stars rather than uniform random dots.
-  ===================================================== */
-
-  class BackgroundRenderer {
-    constructor(canvas) {
-      this.canvas = canvas;
-      this.ctx = canvas.getContext("2d");
-      this.stars = [];
-      this.seed = 48192;
-    }
-
-    rebuild() {
-      const count = Math.min(
-        DATA.graphics.maximumBackgroundStars,
-        Math.round(
-          DATA.graphics.backgroundStarCount *
-          (width * height / 850000) *
-          (state.settings.starDensity / 75)
-        )
-      );
-
-      this.stars = [];
-
-      for (let i = 0; i < Math.max(count, 90); i++) {
-        const seed = this.seed + i * 149;
-        const cls = seeded(seed + 1);
-
-        const radius =
-          cls < .83
-            ? .18 + seeded(seed + 2) * .50
-            : cls < .98
-              ? .66 + seeded(seed + 3) * .55
-              : 1.2 + seeded(seed + 4) * 1.3;
-
-        const temperature = seeded(seed + 5);
-
-        const color =
-          temperature < .13
-            ? [255, 218, 201]
-            : temperature < .52
-              ? [226, 230, 255]
-              : [182, 209, 255];
-
-        this.stars.push({
-          x: seeded(seed + 6) * width,
-          y: seeded(seed + 7) * height,
-          radius,
-          depth: .025 + seeded(seed + 8) * .22,
-          alpha: .12 + seeded(seed + 9) * .78,
-          phase: seeded(seed + 10) * Math.PI * 2,
-          speed: .0002 + seeded(seed + 11) * .0005,
-          color
-        });
-      }
-    }
-
-    draw(time) {
-      const ctx = this.ctx;
-      ctx.clearRect(0, 0, width, height);
-
-      const brightness = state.settings.starBrightness / 100;
-
-      for (const s of this.stars) {
-        const x = (
-          (s.x - camera.x * s.depth) % width + width
-        ) % width;
-
-        const y = (
-          (s.y - camera.y * s.depth) % height + height
-        ) % height;
-
-        const twinkle = reducedMotion()
-          ? 1
-          : .88 + Math.sin(
-              time * s.speed + s.phase
-            ) * .12;
-
-        const alpha = clamp(
-          s.alpha * twinkle * (.45 + brightness),
-          0, 1
-        );
-
-        const [r, g, b] = s.color;
-
-        ctx.fillStyle =
-          `rgba(${r},${g},${b},${alpha})`;
-
-        ctx.beginPath();
-        ctx.arc(x, y, s.radius, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (s.radius > 1.6) {
-          const glow = ctx.createRadialGradient(
-            x, y, 0, x, y, s.radius * 6
-          );
-
-          glow.addColorStop(
-            0, `rgba(${r},${g},${b},${alpha * .15})`
-          );
-          glow.addColorStop(1, "rgba(0,0,0,0)");
-
-          ctx.fillStyle = glow;
-          ctx.beginPath();
-          ctx.arc(x, y, s.radius * 6, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    }
-  }
-
-  /* =====================================================
-     8. PROCEDURAL NEBULA
-
-     A low-resolution cached texture is constructed
-     from layered cloud shapes and fine star-dust.
-
-     The texture is generated only during resize or
-     quality changes, not every animation frame.
-  ===================================================== */
-
-  class NebulaRenderer {
-    constructor(canvas) {
-      this.canvas = canvas;
-      this.ctx = canvas.getContext("2d");
-      this.texture = document.createElement("canvas");
-      this.textureCtx = this.texture.getContext("2d");
-      this.resize();
-    }
-
-    resize() {
-      const scale = DATA.graphics.nebulaResolution;
-
-      this.texture.width = Math.max(
-        320, Math.round(width * scale)
-      );
-      this.texture.height = Math.max(
-        260, Math.round(height * scale)
-      );
-
-      this.generate();
-    }
-
-    generate() {
-      const ctx = this.textureCtx;
-      const w = this.texture.width;
-      const h = this.texture.height;
-
-      ctx.clearRect(0, 0, w, h);
-
-      const clouds = [
-        { x: .14, y: .20, r: .55, c: [23, 64, 135], a: .24 },
-        { x: .31, y: .42, r: .49, c: [35, 81, 172], a: .26 },
-        { x: .48, y: .47, r: .44, c: [60, 100, 194], a: .18 },
-        { x: .62, y: .36, r: .50, c: [23, 51, 112], a: .23 },
-        { x: .83, y: .65, r: .53, c: [49, 36, 117], a: .16 },
-        { x: .17, y: .77, r: .43, c: [14, 35, 89], a: .15 },
-        { x: .74, y: .20, r: .40, c: [34, 65, 129], a: .16 },
-        { x: .48, y: .81, r: .42, c: [15, 36, 89], a: .14 }
-      ];
-
-      // Soft underlying clouds.
-      for (const cloud of clouds) {
-        const x = cloud.x * w;
-        const y = cloud.y * h;
-        const radius = cloud.r * Math.max(w, h);
-
-        const [r, g, b] = cloud.c;
-        const gradient = ctx.createRadialGradient(
-          x, y, 0, x, y, radius
-        );
-
-        gradient.addColorStop(
-          0, `rgba(${r},${g},${b},${cloud.a})`
-        );
-        gradient.addColorStop(
-          .38, `rgba(${r},${g},${b},${cloud.a * .53})`
-        );
-        gradient.addColorStop(1, "rgba(0,0,0,0)");
-
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, w, h);
-      }
-
-      // A diagonal band of wispy clustered gas.
-      // Use seeded positions for a stable background.
-      const count = 240;
-
-      for (let i = 0; i < count; i++) {
-        const s = i * 37 + 109;
-
-        const t = seeded(s);
-        const spread = (seeded(s + 1) - .5);
-
-        const x = (t * 1.35 - .17) * w;
-
-        const y = (
-          .62 - .36 * t +
-          spread * .37
-        ) * h;
-
-        const radius =
-          (9 + seeded(s + 2) * 58) *
-          Math.min(w / 600, 1.4);
-
-        const blue = seeded(s + 3) > .38;
-
-        const color = blue
-          ? [66, 103, 191]
-          : [48, 42, 111];
-
-        const alpha = .016 + seeded(s + 4) * .043;
-
-        const gradient = ctx.createRadialGradient(
-          x, y, 0, x, y, radius
-        );
-
-        gradient.addColorStop(
-          0,
-          `rgba(${color[0]},${color[1]},${color[2]},${alpha})`
-        );
-        gradient.addColorStop(1, "rgba(0,0,0,0)");
-
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Fine mist texture and small dust points.
-      const dots = Math.min(
-        5000,
-        Math.round(w * h / 110)
-      );
-
-      for (let i = 0; i < dots; i++) {
-        const s = i * 19 + 5501;
-
-        const x = seeded(s) * w;
-        const y = seeded(s + 1) * h;
-
-        const bandY = .62 - .36 * (x / w);
-        const distance = Math.abs(y / h - bandY);
-
-        const weight = Math.max(
-          0, 1 - distance / .38
-        );
-
-        if (seeded(s + 2) > weight) continue;
-
-        ctx.fillStyle =
-          `rgba(142,173,239,${.015 + weight * .12})`;
-
-        ctx.fillRect(
-          x, y,
-          .35 + seeded(s + 3) * .8,
-          .35 + seeded(s + 4) * .8
-        );
-      }
-
-      // Vignette inside texture.
-      const vignette = ctx.createRadialGradient(
-        w * .5, h * .48, w * .08,
-        w * .5, h * .48, w * .76
-      );
-
-      vignette.addColorStop(0, "rgba(0,0,0,0)");
-      vignette.addColorStop(1, "rgba(0,0,0,.27)");
-
-      ctx.fillStyle = vignette;
-      ctx.fillRect(0, 0, w, h);
-    }
-
-    draw() {
-      const ctx = this.ctx;
-      ctx.clearRect(0, 0, width, height);
-
-      const opacity =
-        state.settings.nebulaIntensity / 100;
-
-      ctx.save();
-      ctx.globalAlpha = opacity;
-
-      // Very slow spatial parallax.
-      const shiftX = camera.x * .008;
-      const shiftY = camera.y * .008;
-
-      const overscan = 100;
-
-      ctx.drawImage(
-        this.texture,
-        -overscan - shiftX,
-        -overscan - shiftY,
-        width + overscan * 2,
-        height + overscan * 2
-      );
+      ctx.moveTo(0,-vertical);
+      ctx.lineTo(0,vertical);
+      ctx.stroke();
 
       ctx.restore();
     }
   }
 
-  const constellationRenderer =
-    new ConstellationRenderer(starCanvas);
+  function drawConstellations(time) {
+    ctx.clearRect(0,0,width,height);
 
-  const backgroundRenderer =
-    new BackgroundRenderer(backgroundCanvas);
+    for (const e of edges) {
+      const a=nodeMap.get(e.from);
+      const b=nodeMap.get(e.to);
 
-  const nebulaRenderer =
-    new NebulaRenderer(nebulaCanvas);
+      if (!a||!b) continue;
 
-  /* =====================================================
-     9. RENDER LOOP
+      const alpha=Math.min(a.visible,b.visible);
+      if (alpha<.02) continue;
 
-     Camera, backgrounds, stars, and labels are updated
-     together. Expensive texture generation stays outside
-     the animation loop.
-  ===================================================== */
+      if (
+        Math.max(a.sx,b.sx)<-70 ||
+        Math.min(a.sx,b.sx)>width+70 ||
+        Math.max(a.sy,b.sy)<-70 ||
+        Math.min(a.sy,b.sy)>height+70
+      ) continue;
 
-  function renderFrame(time) {
+      const highlighted=
+        selectedNode===a.id || selectedNode===b.id;
+
+      ctx.beginPath();
+      ctx.moveTo(a.sx,a.sy);
+      ctx.lineTo(b.sx,b.sy);
+
+      ctx.strokeStyle=highlighted
+        ? `rgba(205,207,255,${alpha*.6})`
+        : `rgba(160,179,227,${alpha*.24})`;
+
+      ctx.lineWidth=highlighted?1:.65;
+      ctx.stroke();
+    }
+
+    for (const n of nodes) drawStar(n,time);
+  }
+
+  /* ======================================================
+     BACKGROUND & NEBULA
+  ====================================================== */
+
+  function resizeCanvas(element,context,ratio) {
+    element.width=Math.round(width*ratio);
+    element.height=Math.round(height*ratio);
+    context.setTransform(ratio,0,0,ratio,0,0);
+  }
+
+  function rebuildBackgroundStars() {
+    backgroundStars=[];
+
+    const count=clamp(
+      Math.round(
+        DATA.graphics.backgroundStarCount*
+        width*height/850000*
+        state.settings.starDensity/75
+      ),100,DATA.graphics.maximumBackgroundStars
+    );
+
+    for (let i=0;i<count;i++) {
+      const s=i*173+48192;
+      const r=random(s+1);
+
+      backgroundStars.push({
+        x:random(s+2)*width,
+        y:random(s+3)*height,
+        radius:r<.84
+          ? .18+random(s+4)*.49
+          : r<.98
+            ? .68+random(s+5)*.53
+            : 1.25+random(s+6)*1.1,
+        alpha:.13+random(s+7)*.74,
+        depth:.018+random(s+8)*.18,
+        speed:.00014+random(s+9)*.00048,
+        phase:random(s+10)*Math.PI*2,
+        color:random(s+11)<.13
+          ? [245,221,209]
+          : random(s+12)<.6
+            ? [216,225,255]
+            : [180,202,250]
+      });
+    }
+  }
+
+  function drawBackground(time) {
+    bgCtx.clearRect(0,0,width,height);
+    const brightness=state.settings.starBrightness/100;
+
+    for (const star of backgroundStars) {
+      const x=((star.x-camera.x*star.depth)%width+width)%width;
+      const y=((star.y-camera.y*star.depth)%height+height)%height;
+
+      const twinkle=reduced()?1:
+        .88+Math.sin(time*star.speed+star.phase)*.12;
+
+      const a=clamp(
+        star.alpha*twinkle*(.42+brightness),0,1
+      );
+
+      const [r,g,b]=star.color;
+
+      bgCtx.fillStyle=`rgba(${r},${g},${b},${a})`;
+      bgCtx.beginPath();
+      bgCtx.arc(x,y,star.radius,0,Math.PI*2);
+      bgCtx.fill();
+    }
+  }
+
+  function buildNebula() {
+    const texture=document.createElement("canvas");
+    const ratio=DATA.graphics.nebulaResolution;
+
+    texture.width=Math.max(320,Math.round(width*ratio));
+    texture.height=Math.max(260,Math.round(height*ratio));
+
+    const t=texture.getContext("2d");
+    const w=texture.width,h=texture.height;
+
+    const clouds=[
+      [.12,.25,.57,24,68,150,.24],
+      [.33,.48,.50,42,88,173,.23],
+      [.51,.40,.43,52,104,192,.20],
+      [.78,.61,.58,42,39,111,.17],
+      [.83,.20,.47,26,61,133,.17],
+      [.15,.79,.43,20,44,102,.14],
+      [.62,.77,.44,23,49,115,.15]
+    ];
+
+    for (const [cx,cy,rad,r,g,b,alpha] of clouds) {
+      const x=cx*w,y=cy*h;
+      const radius=rad*Math.max(w,h);
+      const grad=t.createRadialGradient(x,y,0,x,y,radius);
+
+      grad.addColorStop(0,`rgba(${r},${g},${b},${alpha})`);
+      grad.addColorStop(.38,`rgba(${r},${g},${b},${alpha*.52})`);
+      grad.addColorStop(1,"transparent");
+
+      t.fillStyle=grad;
+      t.fillRect(0,0,w,h);
+    }
+
+    for (let i=0;i<300;i++) {
+      const s=i*37+181;
+      const progress=random(s);
+      const x=(progress*1.3-.14)*w;
+      const y=(.65-.37*progress+(random(s+1)-.5)*.38)*h;
+      const radius=8+random(s+2)*55;
+      const a=.012+random(s+3)*.044;
+
+      const grad=t.createRadialGradient(x,y,0,x,y,radius);
+      grad.addColorStop(0,`rgba(85,122,207,${a})`);
+      grad.addColorStop(1,"transparent");
+
+      t.fillStyle=grad;
+      t.beginPath();
+      t.arc(x,y,radius,0,Math.PI*2);
+      t.fill();
+    }
+
+    nebulaTexture=texture;
+  }
+
+  function drawNebula() {
+    if (!nebulaTexture) return;
+
+    nebulaCtx.clearRect(0,0,width,height);
+
+    const x=clamp(camera.x*.007,-80,80);
+    const y=clamp(camera.y*.007,-80,80);
+
+    nebulaCtx.globalAlpha=
+      state.settings.nebulaIntensity/100;
+
+    nebulaCtx.drawImage(
+      nebulaTexture,
+      -80-x,-80-y,
+      width+160,height+160
+    );
+
+    nebulaCtx.globalAlpha=1;
+  }
+
+  function resizeGraphics() {
+    width=innerWidth;
+    height=innerHeight;
+
+    dpr=Math.min(
+      devicePixelRatio||1,
+      DATA.graphics.maxPixelRatio
+    );
+
+    resizeCanvas(canvas,ctx,dpr);
+    resizeCanvas(bgCanvas,bgCtx,dpr);
+    resizeCanvas(nebulaCanvas,nebulaCtx,1);
+
+    rebuildBackgroundStars();
+    buildNebula();
+    dirty=true;
+  }
+
+  /* ======================================================
+     RENDER LOOP
+  ====================================================== */
+
+  function frame(time) {
     if (!running) return;
 
-    const targetInterval =
-      1000 / DATA.graphics.targetFrameRate;
-
-    if (time - lastFrameTime >= targetInterval - 1) {
-      stepCamera(time);
-
-      const moving = cameraAnimating;
-
-      if (!reducedMotion() || canvasDirty || moving) {
-        updateStarPositions();
-
-        nebulaRenderer.draw();
-        backgroundRenderer.draw(time);
-        constellationRenderer.draw(time);
-
-        canvasDirty = false;
-      }
-
-      lastFrameTime = time;
+    if (time-lastFrame>=16) {
+      updateTravel(time);
+      positionButtons();
+      drawNebula();
+      drawBackground(time);
+      drawConstellations(time);
+      lastFrame=time;
+      dirty=false;
     }
 
-    animationFrame = requestAnimationFrame(renderFrame);
+    frameHandle=requestAnimationFrame(frame);
   }
 
-  function startRenderLoop() {
+  function startLoop() {
     if (running) return;
-    running = true;
-    animationFrame = requestAnimationFrame(renderFrame);
+    running=true;
+    frameHandle=requestAnimationFrame(frame);
   }
 
-  function stopRenderLoop() {
-    running = false;
+  function stopLoop() {
+    running=false;
+    cancelAnimationFrame(frameHandle);
+  }
 
-    if (animationFrame != null) {
-      cancelAnimationFrame(animationFrame);
-      animationFrame = null;
+  /* ======================================================
+     OVERLAYS
+  ====================================================== */
+
+  function showOverlay(overlay) {
+    if (currentOverlay && currentOverlay!==overlay) {
+      currentOverlay.classList.remove("open");
+      currentOverlay.setAttribute("aria-hidden","true");
+    }
+
+    oldFocus=document.activeElement;
+    currentOverlay=overlay;
+    overlay.classList.add("open");
+    overlay.setAttribute("aria-hidden","false");
+    viewport.inert=true;
+  }
+
+  function closeOverlay() {
+    if (!currentOverlay) return;
+
+    currentOverlay.classList.remove("open");
+    currentOverlay.setAttribute("aria-hidden","true");
+    currentOverlay=null;
+    viewport.inert=false;
+
+    if (oldFocus?.isConnected) oldFocus.focus();
+    else viewport.focus();
+  }
+
+  function openDetail(html) {
+    $("#detailContent").innerHTML=html;
+    $("#detailSheet").scrollTop=0;
+    showOverlay(detailOverlay);
+    $("#closeDetailButton").focus();
+  }
+
+  function openEditor(html,title="Create & Edit",eyebrow="YOUR ARCHIVE") {
+    $("#editorTitle").textContent=title;
+    $("#editorEyebrow").textContent=eyebrow;
+    $("#editorContent").innerHTML=html;
+    $("#editorSheet").scrollTop=0;
+    showOverlay(editorOverlay);
+    $("#closeEditorButton").focus();
+  }
+
+  function confirmAction(message,callback) {
+    confirmCallback=callback;
+    $("#confirmMessage").textContent=message;
+    confirmOverlay.classList.add("open");
+    confirmOverlay.setAttribute("aria-hidden","false");
+    $("#cancelConfirmButton").focus();
+  }
+
+  function closeConfirm() {
+    confirmOverlay.classList.remove("open");
+    confirmOverlay.setAttribute("aria-hidden","true");
+    confirmCallback=null;
+  }
+
+  /* ======================================================
+     GENRE EDITOR
+  ====================================================== */
+
+  function openGenreManager() {
+    openDetail(`
+      <span class="detail-eyebrow">PERSONAL CATEGORIES</span>
+      <h2 id="detailTitle">Genre Creation</h2>
+      <p>Create your own genres and secondary tags.
+      There are no preset categories.</p>
+
+      <h3>Main Genres</h3>
+      <div class="genre-create-row">
+        <input id="newMainGenre" class="form-input"
+          placeholder="New main genre...">
+        <button class="soft-button primary-button"
+          id="addMainGenre">Add</button>
+      </div>
+      <div class="genre-list" id="mainGenreList"></div>
+
+      <h3>Secondary Genres & Tags</h3>
+      <div class="genre-create-row">
+        <input id="newSecondaryGenre" class="form-input"
+          placeholder="New tag...">
+        <button class="soft-button primary-button"
+          id="addSecondaryGenre">Add</button>
+      </div>
+      <div class="genre-list" id="secondaryGenreList"></div>
+    `);
+
+    $("#addMainGenre").onclick=()=>{
+      if (createGenre("main",$("#newMainGenre").value)) {
+        openGenreManager();
+      }
+    };
+
+    $("#addSecondaryGenre").onclick=()=>{
+      if (createGenre("secondary",$("#newSecondaryGenre").value)) {
+        openGenreManager();
+      }
+    };
+
+    for (const [input,type] of [
+      ["newMainGenre","main"],
+      ["newSecondaryGenre","secondary"]
+    ]) {
+      $("#"+input).addEventListener("keydown",e=>{
+        if (e.key==="Enter") {
+          e.preventDefault();
+          const val=e.target.value;
+          if (createGenre(type,val)) openGenreManager();
+        }
+      });
+    }
+
+    renderGenreList("main");
+    renderGenreList("secondary");
+  }
+
+  function renderGenreList(type) {
+    const target=$("#"+(type==="main"
+      ?"mainGenreList":"secondaryGenreList"));
+
+    const list=genreCollection(type);
+
+    if (!list.length) {
+      target.innerHTML=`<p class="genre-empty">
+        No ${type==="main"?"main genres":"secondary tags"} created yet.
+      </p>`;
+      return;
+    }
+
+    target.innerHTML="";
+
+    for (const genre of list) {
+      const chip=document.createElement("div");
+      chip.className="genre-chip";
+
+      const name=document.createElement("span");
+      name.textContent=genre.name;
+
+      const rename=document.createElement("button");
+      rename.textContent="✎";
+      rename.title="Rename";
+
+      const remove=document.createElement("button");
+      remove.textContent="×";
+      remove.title="Delete";
+
+      rename.onclick=()=>{
+        const result=prompt("Rename genre:",genre.name);
+        if (result===null) return;
+        renameGenre(type,genre.id,result);
+        openGenreManager();
+      };
+
+      remove.onclick=()=>{
+        confirmAction(
+          `Delete "${genre.name}"? Its assignments will be removed from entries.`,
+          ()=>{
+            deleteGenre(type,genre.id);
+            openGenreManager();
+          }
+        );
+      };
+
+      chip.append(name,rename,remove);
+      target.appendChild(chip);
     }
   }
 
-  /* =====================================================
-     10. USER INTERACTIONS
-  ===================================================== */
+  /* ======================================================
+     MANAGER OVERVIEW
+  ====================================================== */
 
-  function pointerPoint(e) {
-    return { x: e.clientX, y: e.clientY };
+  function openManager() {
+    managerView={type:null,id:null};
+
+    const sections=TYPES.map(type=>{
+      const list=collection(type)
+        .slice()
+        .sort((a,b)=>(a.order??0)-(b.order??0));
+
+      return `
+        <section class="manager-section">
+          <div class="manager-section-title">
+            <h3>${type[0].toUpperCase()+type.slice(1)}s</h3>
+            <span class="manager-count">${list.length}</span>
+          </div>
+
+          <div class="manager-list">
+            ${list.length?list.map(item=>`
+              <div class="manager-item">
+                <div class="manager-item-main">
+                  <span class="manager-item-title">
+                    ${escapeHTML(titleOf(item))}
+                  </span>
+                  <span class="manager-item-subtitle">
+                    ${escapeHTML(parentOf(type,item)?.item.title ||
+                      (type==="production"?"Standalone":""))}
+                  </span>
+                </div>
+                <div class="manager-item-actions">
+                  <button class="mini-button" data-edit="${type}"
+                    data-id="${escapeHTML(item.id)}" title="Edit">✎</button>
+                  <button class="mini-button" data-up="${type}"
+                    data-id="${escapeHTML(item.id)}" title="Move up">↑</button>
+                  <button class="mini-button" data-down="${type}"
+                    data-id="${escapeHTML(item.id)}" title="Move down">↓</button>
+                  <button class="mini-button" data-delete="${type}"
+                    data-id="${escapeHTML(item.id)}" title="Delete">×</button>
+                </div>
+              </div>
+            `).join(""):`<p class="manager-empty">
+              No ${type}s added yet.
+            </p>`}
+          </div>
+        </section>
+      `;
+    }).join("");
+
+    openEditor(`
+      <p>Create the structure of your archive.
+      All changes are saved automatically.</p>
+
+      <div class="manager-actions">
+        <button class="soft-button primary-button"
+          data-new="group">+ Group</button>
+        <button class="soft-button primary-button"
+          data-new="production">+ Production</button>
+        <button class="soft-button"
+          data-new="season">+ Season</button>
+        <button class="soft-button"
+          data-new="episode">+ Episode</button>
+      </div>
+
+      ${sections}
+    `);
+
+    $$("#editorContent [data-new]").forEach(el=>{
+      el.onclick=()=>openEntityForm(el.dataset.new);
+    });
+
+    $$("#editorContent [data-edit]").forEach(el=>{
+      el.onclick=()=>openEntityForm(
+        el.dataset.edit,el.dataset.id
+      );
+    });
+
+    $$("#editorContent [data-up]").forEach(el=>{
+      el.onclick=()=>{
+        moveOrder(el.dataset.up,el.dataset.id,-1);
+        openManager();
+      };
+    });
+
+    $$("#editorContent [data-down]").forEach(el=>{
+      el.onclick=()=>{
+        moveOrder(el.dataset.down,el.dataset.id,1);
+        openManager();
+      };
+    });
+
+    $$("#editorContent [data-delete]").forEach(el=>{
+      el.onclick=()=>{
+        const type=el.dataset.delete;
+        const item=getEntity(type,el.dataset.id);
+
+        confirmAction(
+          `Delete "${titleOf(item)}" and all its descendants? This cannot be undone.`,
+          ()=>{
+            deleteEntity(type,el.dataset.id);
+            openManager();
+          }
+        );
+      };
+    });
   }
 
-  function pointerDistance(a, b) {
-    return Math.hypot(a.x - b.x, a.y - b.y);
+  /* ======================================================
+     EDITING FORMS
+  ====================================================== */
+
+  function optionList(items,selected) {
+    return items.map(item=>`
+      <option value="${escapeHTML(item.id)}"
+        ${String(item.id)===String(selected)?"selected":""}>
+        ${escapeHTML(item.title || item.name)}
+      </option>
+    `).join("");
   }
 
-  function pointerCenter(a, b) {
-    return {
-      x: (a.x + b.x) / 2,
-      y: (a.y + b.y) / 2
-    };
+  function genreCheckboxes(type,ids=[]) {
+    return genreCollection(type).map(g=>`
+      <label class="field-checkbox">
+        <input type="checkbox"
+          data-genre="${type}"
+          value="${escapeHTML(g.id)}"
+          ${ids.includes(g.id)?"checked":""}>
+        ${escapeHTML(g.name)}
+      </label>
+    `).join("") || `<small>No genres created yet.</small>`;
   }
 
-  function beginPinch() {
-    if (pointers.size < 2) return;
-
-    const [a, b] = [...pointers.values()];
-    const center = pointerCenter(a, b);
-
-    gesture = {
-      type: "pinch",
-      originalDistance: Math.max(
-        1, pointerDistance(a, b)
-      ),
-      originalZoom: camera.zoom,
-      anchor: screenToWorld(center.x, center.y),
-      moved: true
-    };
-
-    suppressClickUntil = performance.now() + 500;
+  function formField(id,label,value="",type="text") {
+    return `
+      <div class="form-field">
+        <label for="field-${id}">${label}</label>
+        <input id="field-${id}" class="form-input"
+          type="${type}" value="${escapeHTML(value ?? "")}">
+      </div>
+    `;
   }
 
-  function bindGestures() {
-    viewport.addEventListener("pointerdown", e => {
-      if (e.pointerType === "mouse" && e.button !== 0) {
-        return;
+  function selectField(id,label,options,value) {
+    return `
+      <div class="form-field">
+        <label for="field-${id}">${label}</label>
+        <select id="field-${id}" class="form-select">
+          ${options.map(opt=>`
+            <option value="${escapeHTML(opt.value)}"
+              ${String(opt.value)===String(value)?"selected":""}>
+              ${escapeHTML(opt.label)}
+            </option>
+          `).join("")}
+        </select>
+      </div>
+    `;
+  }
+
+  function openEntityForm(type,id=null,parentId=null) {
+    const existing=id?getEntity(type,id):null;
+    const data=existing || {};
+
+    if (id&&!existing) {
+      notify("Entry not found.");
+      openManager();
+      return;
+    }
+
+    const title=existing
+      ? `Edit ${type}`
+      : `Create ${type}`;
+
+    let html=`<form id="archiveForm" class="archive-form">
+      ${formField("title","Title",data.title || "")}
+    `;
+
+    if (type==="production") {
+      html+=selectField(
+        "groupId","Parent Group",
+        [
+          {value:"",label:"None — standalone production"},
+          ...collection("group").map(g=>({
+            value:g.id,label:g.title
+          }))
+        ],
+        data.groupId || parentId || ""
+      );
+
+      html+=selectField(
+        "mediaType","Form of Media",
+        DATA.mediaTypes.map(v=>({value:v,label:v})),
+        data.mediaType || "TV Series"
+      );
+
+      html+=selectField(
+        "status","Watching Status",
+        DATA.statuses.map(v=>({value:v,label:v})),
+        data.status || "Planned"
+      );
+
+      html+=`
+        <label class="field-checkbox">
+          <input type="checkbox" id="field-watchlist"
+            ${data.watchlist?"checked":""}>
+          Add to Watchlist
+        </label>
+      `;
+    }
+
+    if (type==="season") {
+      html+=selectField(
+        "productionId","Production",
+        collection("production").map(p=>({
+          value:p.id,label:p.title
+        })),
+        data.productionId || parentId || ""
+      );
+
+      html+=selectField(
+        "status","Watching Status",
+        DATA.statuses.map(v=>({value:v,label:v})),
+        data.status || "Planned"
+      );
+    }
+
+    if (type==="episode") {
+      html+=selectField(
+        "seasonId","Season",
+        collection("season").map(s=>({
+          value:s.id,label:s.title
+        })),
+        data.seasonId || parentId || ""
+      );
+
+      html+=formField(
+        "duration","Duration (minutes)",
+        data.duration ?? "", "number"
+      );
+    }
+
+    if (type==="group" || type==="production") {
+      html+=`
+        <div class="form-field">
+          <label>Main Genres</label>
+          ${genreCheckboxes("main",data.mainGenreIds || [])}
+        </div>
+        <div class="form-field">
+          <label>Secondary Genres & Tags</label>
+          ${genreCheckboxes("secondary",data.secondaryGenreIds || [])}
+        </div>
+      `;
+
+      html+=formField(
+        "banner","Banner Image URL (optional)",
+        data.banner || "","url"
+      );
+    }
+
+    if (type==="production" || type==="season") {
+      html+=`<div class="form-grid">
+        ${formField("releaseStart","Airing / Release Start",
+          data.releaseStart || "","date")}
+        ${formField("releaseEnd","Airing / Release End",
+          data.releaseEnd || "","date")}
+      </div>`;
+    }
+
+    if (type==="production" || type==="episode") {
+      html+=formField(
+        "lastWatched",
+        type==="episode"?"Date Watched":"Last Watched",
+        data.lastWatched || data.watchedAt || "",
+        "date"
+      );
+    }
+
+    html+=`
+      <div class="form-field">
+        <label for="field-notes">Personal Observations</label>
+        <textarea id="field-notes"
+          class="form-textarea"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="soft-button"
+          id="cancelForm">Cancel</button>
+        <button type="submit"
+          class="soft-button primary-button">
+          ${existing?"Save Changes":"Create Entry"}
+        </button>
+      </div>
+    </form>`;
+
+    openEditor(html,title.toUpperCase(),"ARCHIVE EDITOR");
+
+    $("#field-notes").value=data.notes || "";
+
+    $("#cancelForm").onclick=openManager;
+
+    $("#archiveForm").addEventListener("submit",event=>{
+      event.preventDefault();
+
+      const get=name =>
+        $("#field-"+name)?.value || "";
+
+      const values={
+        title:get("title").trim(),
+        notes:$("#field-notes").value
+      };
+
+      if (type==="production") {
+        values.groupId=get("groupId") || null;
+        values.mediaType=get("mediaType");
+        values.status=get("status");
+        values.watchlist=$("#field-watchlist").checked;
       }
 
-      stopCameraAnimation();
-
-      pointers.set(e.pointerId, pointerPoint(e));
-
-      if (pointers.size === 1) {
-        gesture = {
-          type: "drag",
-          total: 0,
-          moved: false
-        };
+      if (type==="season") {
+        values.productionId=get("productionId");
+        values.status=get("status");
       }
 
-      if (pointers.size >= 2) {
-        beginPinch();
+      if (type==="episode") {
+        values.seasonId=get("seasonId");
+        values.duration=Math.max(0,Number(get("duration"))||0);
+        values.watchedAt=get("lastWatched");
+      }
+
+      if (type==="group" || type==="production") {
+        values.banner=get("banner");
+
+        values.mainGenreIds=
+          $$('#archiveForm [data-genre="main"]:checked')
+            .map(input=>input.value);
+
+        values.secondaryGenreIds=
+          $$('#archiveForm [data-genre="secondary"]:checked')
+            .map(input=>input.value);
+      }
+
+      if (type==="production" || type==="season") {
+        values.releaseStart=get("releaseStart");
+        values.releaseEnd=get("releaseEnd");
+      }
+
+      if (type==="production") {
+        values.lastWatched=get("lastWatched");
+      }
+
+      const success=existing
+        ? updateEntity(type,id,values)
+        : createEntity(type,values);
+
+      if (success) openManager();
+    });
+  }
+
+  /* ======================================================
+     DETAILS & NAVIGATION
+  ====================================================== */
+
+  function selectStar(node) {
+    if (node.type==="navigation") {
+      switch(node.action) {
+        case "create":
+          openManager();
+          return;
+        case "genres":
+          openGenreManager();
+          return;
+        case "settings":
+          openSettings();
+          return;
+        case "library":
+        case "watchlist":
+          openCollection(node.action);
+          return;
+      }
+    }
+
+    focusNode(node);
+
+    if (node.type==="episode") {
+      openRecordDetails(node);
+    }
+  }
+
+  function openRecordDetails(node) {
+    const record=node.record || {};
+
+    const type=node.type;
+
+    const genres=[
+      ...(record.mainGenreIds || []).map(id=>genreName(id,"main")),
+      ...(record.secondaryGenreIds || []).map(id=>genreName(id,"secondary"))
+    ].filter(Boolean);
+
+    openDetail(`
+      <span class="detail-eyebrow">${escapeHTML(type)}</span>
+      <h2 id="detailTitle">${escapeHTML(node.title)}</h2>
+
+      ${genres.length?`<p>${escapeHTML(genres.join(" · "))}</p>`:""}
+
+      <p>${escapeHTML(record.notes || "")}</p>
+
+      ${!node.demo?`
+        <button class="detail-action" id="editRecordButton">
+          Edit Entry
+        </button>
+      `:"<p>Demonstration record</p>"}
+    `);
+
+    if (!node.demo) {
+      $("#editRecordButton").onclick=()=>{
+        openEntityForm(type,node.id);
+      };
+    }
+  }
+
+  function openCollection(type) {
+    activeCollection=type;
+    filters={query:"",sort:"alphabetical",status:""};
+
+    openDetail(`
+      <span class="detail-eyebrow">YOUR ARCHIVE</span>
+      <h2 id="detailTitle">
+        ${type==="library"?"Library":"Watchlist"}
+      </h2>
+
+      <div class="library-toolbar">
+        <div class="library-control">
+          <label for="librarySearch">Search</label>
+          <input class="library-input" id="librarySearch"
+            placeholder="Title...">
+        </div>
+
+        <div class="library-control">
+          <label for="librarySort">Sort</label>
+          <select class="library-select" id="librarySort">
+            ${DATA.sorting.map(s=>`
+              <option value="${s.id}">${s.title}</option>
+            `).join("")}
+          </select>
+        </div>
+      </div>
+
+      <div class="library-count" id="libraryCount"></div>
+      <div class="library-results" id="libraryResults"></div>
+    `);
+
+    $("#librarySearch").oninput=e=>{
+      filters.query=e.target.value;
+      renderLibrary();
+    };
+
+    $("#librarySort").onchange=e=>{
+      filters.sort=e.target.value;
+      renderLibrary();
+    };
+
+    renderLibrary();
+  }
+
+  function renderLibrary() {
+    let items=collection("production").slice();
+
+    if (activeCollection==="watchlist") {
+      items=items.filter(i=>
+        i.watchlist || i.status==="Planned"
+      );
+    }
+
+    if (filters.query) {
+      const q=filters.query.toLowerCase();
+      items=items.filter(i=>titleOf(i).toLowerCase().includes(q));
+    }
+
+    const sort=filters.sort;
+
+    const rating=i=>{
+      const n=Number(i.averageRating ?? i.rating);
+      return Number.isFinite(n)?n:null;
+    };
+
+    items.sort((a,b)=>{
+      switch(sort) {
+        case "alphabeticalReverse":
+          return titleOf(b).localeCompare(titleOf(a));
+        case "highestRated":
+          return (rating(b)??-1)-(rating(a)??-1);
+        case "lowestRated":
+          return (rating(a)??999)-(rating(b)??999);
+        case "newestAdded":
+          return dateValue(b.createdAt)-dateValue(a.createdAt);
+        case "oldestAdded":
+          return dateValue(a.createdAt)-dateValue(b.createdAt);
+        case "lastWatched":
+          return dateValue(b.lastWatched)-dateValue(a.lastWatched);
+        case "earliestRelease":
+          return dateValue(a.releaseStart)-dateValue(b.releaseStart);
+        case "latestRelease":
+          return dateValue(b.releaseStart)-dateValue(a.releaseStart);
+        case "custom":
+          return (a.order??0)-(b.order??0);
+        default:
+          return titleOf(a).localeCompare(titleOf(b));
       }
     });
 
-    viewport.addEventListener("pointermove", e => {
-      if (!pointers.has(e.pointerId)) return;
+    $("#libraryCount").textContent=
+      `${items.length} production${items.length===1?"":"s"}`;
 
-      const previous = pointers.get(e.pointerId);
-      const current = pointerPoint(e);
+    $("#libraryResults").innerHTML=items.length
+      ? items.map(item=>`
+          <button class="library-entry"
+            data-library-id="${escapeHTML(item.id)}">
+            <span class="library-entry-main">
+              <span class="library-entry-title">
+                ${escapeHTML(titleOf(item))}
+              </span>
+              <span class="library-entry-meta">
+                ${escapeHTML(item.mediaType || "Production")}
+              </span>
+            </span>
+          </button>
+        `).join("")
+      : `<div class="library-empty">
+          <h3>Nothing here yet.</h3>
+          <p>Create your first production through
+          the Create & Edit constellation star.</p>
+        </div>`;
 
-      pointers.set(e.pointerId, current);
+    $$("[data-library-id]").forEach(el=>{
+      el.onclick=()=>{
+        const node=nodeMap.get(el.dataset.libraryId);
+        closeOverlay();
+        if (node) focusNode(node);
+      };
+    });
+  }
 
-      if (pointers.size >= 2) {
-        const [a, b] = [...pointers.values()];
+  /* ======================================================
+     GLOBAL SEARCH
+  ====================================================== */
 
-        if (!gesture || gesture.type !== "pinch") {
-          beginPinch();
+  function openSearch() {
+    $("#globalSearch").value="";
+    $("#searchResults").innerHTML="";
+    showOverlay(searchOverlay);
+    $("#globalSearch").focus();
+  }
+
+  function renderSearch() {
+    const q=$("#globalSearch").value.trim().toLowerCase();
+    const results=[];
+
+    if (q) {
+      for (const type of TYPES) {
+        for (const item of collection(type)) {
+          if (titleOf(item).toLowerCase().includes(q)) {
+            results.push({type,item});
+          }
         }
+      }
+    }
 
-        const center = pointerCenter(a, b);
-        const dist = Math.max(1, pointerDistance(a, b));
+    $("#searchResults").innerHTML=results.slice(0,60)
+      .map(({type,item})=>`
+        <button class="search-result"
+          data-search-id="${escapeHTML(item.id)}">
+          <span>${escapeHTML(titleOf(item))}</span>
+          <small>${type}</small>
+        </button>
+      `).join("");
 
-        const zoom = clamp(
-          gesture.originalZoom *
-          dist / gesture.originalDistance,
-          MIN_ZOOM,
-          MAX_ZOOM
-        );
+    $$("[data-search-id]").forEach(el=>{
+      el.onclick=()=>{
+        const node=nodeMap.get(el.dataset.searchId);
+        closeOverlay();
+        if (node) focusNode(node);
+      };
+    });
+  }
 
-        setCamera(
-          gesture.anchor.x -
-            (center.x - width / 2) / zoom,
-          gesture.anchor.y -
-            (center.y - height / 2) / zoom,
-          zoom
-        );
+  /* ======================================================
+     SETTINGS
+  ====================================================== */
 
-        gesture.moved = true;
-        suppressClickUntil = performance.now() + 450;
+  function openSettings() {
+    const settings=[
+      ["starDensity","Star Density",10],
+      ["starBrightness","Star Brightness",10],
+      ["nebulaIntensity","Nebula Intensity",0],
+      ["constellationGlow","Constellation Glow",0]
+    ];
 
+    openDetail(`
+      <span class="detail-eyebrow">YOUR UNIVERSE</span>
+      <h2 id="detailTitle">Settings</h2>
+
+      ${settings.map(([key,label,min])=>`
+        <div class="detail-row">
+          <label for="setting-${key}">${label}</label>
+          <div>
+            <input id="setting-${key}"
+              class="setting-range" type="range"
+              min="${min}" max="100" step="5"
+              value="${state.settings[key]}">
+            <output class="setting-value"
+              id="value-${key}">${state.settings[key]}</output>
+          </div>
+        </div>
+      `).join("")}
+
+      <div class="detail-row">
+        <label for="setting-motion">Reduce Motion</label>
+        <input type="checkbox" id="setting-motion"
+          class="motion-checkbox"
+          ${state.settings.reduceMotion?"checked":""}>
+      </div>
+
+      <h3>Backups</h3>
+      <p>Your records are saved in this browser.
+      Export backups regularly.</p>
+
+      <button class="detail-action" id="exportArchive">
+        Export Archive
+      </button>
+      <button class="detail-action" id="importArchive">
+        Import Archive
+      </button>
+    `);
+
+    for (const [key] of settings) {
+      $("#setting-"+key).oninput=e=>{
+        state.settings[key]=Number(e.target.value);
+        $("#value-"+key).textContent=e.target.value;
+
+        if (key==="starDensity") rebuildBackgroundStars();
+
+        dirty=true;
+        saveState();
+      };
+    }
+
+    $("#setting-motion").onchange=e=>{
+      state.settings.reduceMotion=e.target.checked;
+      applyMotion();
+      saveState();
+    };
+
+    $("#exportArchive").onclick=exportBackup;
+    $("#importArchive").onclick=()=>$("#importFile").click();
+  }
+
+  /* ======================================================
+     BACKUPS
+  ====================================================== */
+
+  function exportBackup() {
+    const backup={
+      app:DATA.appName,
+      schemaVersion:DATA.schemaVersion,
+      exportedAt:new Date().toISOString(),
+      data:state
+    };
+
+    const blob=new Blob(
+      [JSON.stringify(backup,null,2)],
+      {type:"application/json"}
+    );
+
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;
+    link.download="watch-archive-"+
+      new Date().toISOString().slice(0,10)+".json";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    notify("Backup prepared.");
+  }
+
+  async function importBackup(file) {
+    if (!file) return;
+
+    try {
+      const backup=JSON.parse(await file.text());
+
+      if (
+        backup.app!==DATA.appName ||
+        backup.schemaVersion!==DATA.schemaVersion ||
+        !backup.data?.archive ||
+        !TYPES.every(t=>
+          Array.isArray(backup.data.archive[COLLECTIONS[t]])
+        )
+      ) throw new Error("Invalid backup");
+
+      if (!confirm(
+        "Replace your existing local archive with this backup? "+
+        "Export your current data first if needed."
+      )) return;
+
+      const previous=state;
+      state=normalizeState(backup.data);
+
+      if (!saveState()) {
+        state=previous;
         return;
       }
 
-      if (!gesture || gesture.type !== "drag") {
-        gesture = {
-          type: "drag",
-          total: 0,
-          moved: false
-        };
+      closeOverlay();
+      rebuildUniverse();
+      rebuildBackgroundStars();
+      goHome();
+      notify("Archive imported.");
+
+    } catch(e) {
+      console.error(e);
+      notify("Import failed.");
+    } finally {
+      $("#importFile").value="";
+    }
+  }
+
+  /* ======================================================
+     TOUCH, PINCH & PAN
+  ====================================================== */
+
+  function point(e) {
+    return {x:e.clientX,y:e.clientY};
+  }
+
+  function dist(a,b) {
+    return Math.hypot(a.x-b.x,a.y-b.y);
+  }
+
+  function center(a,b) {
+    return {x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+  }
+
+  function startPinch() {
+    if (pointers.size<2) return;
+
+    const [a,b]=[...pointers.values()];
+    const c=center(a,b);
+
+    gesture={
+      kind:"pinch",
+      distance:Math.max(1,dist(a,b)),
+      zoom:camera.zoom,
+      anchor:screenToWorld(c.x,c.y),
+      moved:true
+    };
+
+    blockClickUntil=performance.now()+450;
+  }
+
+  function bindGestures() {
+    viewport.addEventListener("pointerdown",e=>{
+      if (e.pointerType==="mouse"&&e.button!==0) return;
+
+      stopTravel();
+      pointers.set(e.pointerId,point(e));
+
+      if (pointers.size===1) {
+        gesture={kind:"drag",distance:0,moved:false};
+      } else if (pointers.size>=2) {
+        startPinch();
+      }
+    });
+
+    viewport.addEventListener("pointermove",e=>{
+      if (!pointers.has(e.pointerId)) return;
+
+      const old=pointers.get(e.pointerId);
+      const now=point(e);
+
+      pointers.set(e.pointerId,now);
+
+      if (pointers.size>=2) {
+        const [a,b]=[...pointers.values()];
+        if (gesture?.kind!=="pinch") startPinch();
+
+        const c=center(a,b);
+        const zoom=clamp(
+          gesture.zoom*
+          Math.max(1,dist(a,b))/gesture.distance,
+          DATA.camera.minZoom,
+          DATA.camera.maxZoom
+        );
+
+        setCamera(
+          gesture.anchor.x-(c.x-width/2)/zoom,
+          gesture.anchor.y-(c.y-height/2)/zoom,
+          zoom
+        );
+
+        gesture.moved=true;
+        blockClickUntil=performance.now()+400;
+        return;
       }
 
-      const dx = current.x - previous.x;
-      const dy = current.y - previous.y;
+      const dx=now.x-old.x;
+      const dy=now.y-old.y;
 
-      gesture.total += Math.hypot(dx, dy);
+      gesture.distance+=Math.hypot(dx,dy);
 
-      if (gesture.total > cameraConfig.tapThreshold) {
-        gesture.moved = true;
+      if (gesture.distance>DATA.camera.tapThreshold) {
+        gesture.moved=true;
+        blockClickUntil=performance.now()+350;
         viewport.classList.add("dragging");
-
-        suppressClickUntil = performance.now() + 350;
 
         if (!viewport.hasPointerCapture(e.pointerId)) {
           viewport.setPointerCapture(e.pointerId);
@@ -1579,13 +2522,13 @@
       }
 
       setCamera(
-        camera.x - dx / camera.zoom,
-        camera.y - dy / camera.zoom,
+        camera.x-dx/camera.zoom,
+        camera.y-dy/camera.zoom,
         camera.zoom
       );
     });
 
-    function endPointer(e) {
+    const end=e=>{
       if (!pointers.has(e.pointerId)) return;
 
       pointers.delete(e.pointerId);
@@ -1595,945 +2538,135 @@
       }
 
       if (gesture?.moved) {
-        suppressClickUntil = performance.now() + 350;
+        blockClickUntil=performance.now()+350;
       }
 
-      if (pointers.size === 0) {
-        gesture = null;
+      if (!pointers.size) {
+        gesture=null;
         viewport.classList.remove("dragging");
-      } else if (pointers.size === 1) {
-        gesture = {
-          type: "drag",
-          total: 0,
-          moved: true
-        };
+      } else if (pointers.size===1) {
+        gesture={kind:"drag",distance:0,moved:true};
       }
-    }
+    };
 
-    viewport.addEventListener("pointerup", endPointer);
-    viewport.addEventListener("pointercancel", endPointer);
+    viewport.addEventListener("pointerup",end);
+    viewport.addEventListener("pointercancel",end);
 
-    viewport.addEventListener("wheel", e => {
-      e.preventDefault();
-
-      const factor = Math.exp(
-        -e.deltaY * cameraConfig.wheelSensitivity
-      );
-
-      zoomAt(e.clientX, e.clientY, factor);
-    }, { passive: false });
-
-    viewport.addEventListener("click", e => {
-      if (performance.now() < suppressClickUntil) {
+    viewport.addEventListener("click",e=>{
+      if (performance.now()<blockClickUntil) {
         e.preventDefault();
         e.stopImmediatePropagation();
       }
-    }, true);
+    },true);
 
-    viewport.addEventListener("keydown", e => {
-      if (e.target !== viewport) return;
-
-      const step = 85 / camera.zoom;
-
-      switch (e.key) {
-        case "ArrowLeft":
-          setCamera(camera.x - step, camera.y, camera.zoom);
-          break;
-        case "ArrowRight":
-          setCamera(camera.x + step, camera.y, camera.zoom);
-          break;
-        case "ArrowUp":
-          setCamera(camera.x, camera.y - step, camera.zoom);
-          break;
-        case "ArrowDown":
-          setCamera(camera.x, camera.y + step, camera.zoom);
-          break;
-        case "+":
-        case "=":
-          zoomAt(width / 2, height / 2, 1.25);
-          break;
-        case "-":
-          zoomAt(width / 2, height / 2, .8);
-          break;
-        default:
-          return;
-      }
-
+    viewport.addEventListener("wheel",e=>{
       e.preventDefault();
-    });
-  }
-
-  /* =====================================================
-     11. MEDIA COLLECTIONS
-
-     Library / History / Rankings / Watchlist
-     operate exclusively on saved productions.
-  ===================================================== */
-
-  function productions() {
-    return state.archive.productions.filter(
-      p => p && typeof p === "object"
-    );
-  }
-
-  function titleOf(item) {
-    return String(item.title || item.name || "Untitled");
-  }
-
-  function getRating(item) {
-    const raw =
-      item.averageRating ??
-      item.calculatedRating ??
-      item.rating;
-
-    if (raw === null || raw === undefined || raw === "") {
-      return null;
-    }
-
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  function getLastWatched(item) {
-    const raw =
-      item.lastWatched ??
-      item.lastSeen ??
-      item.watchedAt;
-
-    if (!raw) return 0;
-
-    const time = new Date(raw).getTime();
-    return Number.isFinite(time) ? time : 0;
-  }
-
-  function getReleaseYear(item) {
-    const raw =
-      item.startYear ??
-      item.releaseYear ??
-      item.year;
-
-    const n = Number(raw);
-    return raw == null || !Number.isFinite(n)
-      ? null
-      : n;
-  }
-
-  function addedTime(item) {
-    const raw = item.createdAt || item.addedAt;
-    if (!raw) return 0;
-
-    const n = new Date(raw).getTime();
-    return Number.isFinite(n) ? n : 0;
-  }
-
-  function genreList(item) {
-    const genres = item.genres || item.mainGenres || [];
-    return Array.isArray(genres)
-      ? genres
-      : typeof genres === "string"
-        ? genres.split(",").map(s => s.trim())
-        : [];
-  }
-
-  function isWatchlisted(item) {
-    return item.watchlist === true ||
-      item.status === "Planned" ||
-      item.status === "Watchlist";
-  }
-
-  function viewItems(type) {
-    let list = [...productions()];
-
-    if (type === "history") {
-      list = list.filter(p => getLastWatched(p) > 0);
-    } else if (type === "rankings") {
-      list = list.filter(p => getRating(p) !== null);
-    } else if (type === "watchlist") {
-      list = list.filter(isWatchlisted);
-    }
-
-    return list;
-  }
-
-  function sortedItems(list, sort) {
-    const result = [...list];
-    const byTitle = (a, b) =>
-      titleOf(a).localeCompare(titleOf(b), undefined, {
-        sensitivity: "base"
-      });
-
-    result.sort((a, b) => {
-      switch (sort) {
-        case "alphabeticalReverse":
-          return -byTitle(a, b);
-        case "highestRated":
-          return (getRating(b) ?? -1) -
-            (getRating(a) ?? -1) || byTitle(a, b);
-        case "lowestRated":
-          return (getRating(a) ?? 999) -
-            (getRating(b) ?? 999) || byTitle(a, b);
-        case "lastWatched":
-          return getLastWatched(b) -
-            getLastWatched(a) || byTitle(a, b);
-        case "oldestAdded":
-          return addedTime(a) - addedTime(b) ||
-            byTitle(a, b);
-        case "newestAdded":
-          return addedTime(b) - addedTime(a) ||
-            byTitle(a, b);
-        case "earliestRelease":
-          return (getReleaseYear(a) ?? 99999) -
-            (getReleaseYear(b) ?? 99999) ||
-            byTitle(a, b);
-        case "latestRelease":
-          return (getReleaseYear(b) ?? -99999) -
-            (getReleaseYear(a) ?? -99999) ||
-            byTitle(a, b);
-        default:
-          return byTitle(a, b);
-      }
-    });
-
-    return result;
-  }
-
-  function filteredCollection(type) {
-    let items = viewItems(type);
-
-    const q = collectionOptions.query.trim().toLowerCase();
-
-    if (q) {
-      items = items.filter(item =>
-        titleOf(item).toLowerCase().includes(q)
+      zoomAt(
+        e.clientX,e.clientY,
+        Math.exp(-e.deltaY*DATA.camera.wheelSensitivity)
       );
-    }
-
-    if (collectionOptions.genre) {
-      items = items.filter(item =>
-        genreList(item).some(g =>
-          g.toLowerCase() ===
-          collectionOptions.genre.toLowerCase()
-        )
-      );
-    }
-
-    if (collectionOptions.mediaType) {
-      items = items.filter(item =>
-        (item.mediaType || item.type || "") ===
-        collectionOptions.mediaType
-      );
-    }
-
-    if (collectionOptions.status) {
-      items = items.filter(item =>
-        item.status === collectionOptions.status
-      );
-    }
-
-    return sortedItems(items, collectionOptions.sort);
+    },{passive:false});
   }
 
-  function collectionHeader(type) {
-    const config = DATA.libraryViews[type];
-
-    return `
-      <span class="detail-eyebrow">YOUR ARCHIVE</span>
-      <h2 id="detailTitle">${escapeHTML(config.title)}</h2>
-      <p>${escapeHTML(config.description)}</p>
-    `;
-  }
-
-  function collectionToolbar() {
-    const sortOptions = DATA.sorting.map(opt =>
-      `<option value="${escapeHTML(opt.id)}">
-        ${escapeHTML(opt.title)}
-      </option>`
-    ).join("");
-
-    const genreOptions = DATA.mainGenres.map(genre =>
-      `<option value="${escapeHTML(genre)}">
-        ${escapeHTML(genre)}
-      </option>`
-    ).join("");
-
-    const mediaOptions = DATA.mediaTypes.map(type =>
-      `<option value="${escapeHTML(type)}">
-        ${escapeHTML(type)}
-      </option>`
-    ).join("");
-
-    const statusOptions = DATA.statuses.map(status =>
-      `<option value="${escapeHTML(status)}">
-        ${escapeHTML(status)}
-      </option>`
-    ).join("");
-
-    return `
-      <div class="library-toolbar">
-
-        <div class="library-control">
-          <label for="collectionSearch">Search</label>
-          <input
-            id="collectionSearch"
-            class="library-input"
-            type="search"
-            placeholder="Find a title..."
-          >
-        </div>
-
-        <div class="library-control">
-          <label for="collectionSort">Sort by</label>
-          <select id="collectionSort" class="library-select">
-            ${sortOptions}
-          </select>
-        </div>
-
-        <div class="library-control">
-          <label for="collectionGenre">Main genre</label>
-          <select id="collectionGenre" class="library-select">
-            <option value="">All genres</option>
-            ${genreOptions}
-          </select>
-        </div>
-
-        <div class="library-control">
-          <label for="collectionMedia">Media type</label>
-          <select id="collectionMedia" class="library-select">
-            <option value="">All media</option>
-            ${mediaOptions}
-          </select>
-        </div>
-
-        <div class="library-control">
-          <label for="collectionStatus">Status</label>
-          <select id="collectionStatus" class="library-select">
-            <option value="">All statuses</option>
-            ${statusOptions}
-          </select>
-        </div>
-
-      </div>
-
-      <div id="collectionCount" class="library-count"></div>
-      <div id="collectionResults" class="library-results"></div>
-    `;
-  }
-
-  function renderCollectionResults() {
-    if (!currentCollection) return;
-
-    const items = filteredCollection(currentCollection);
-    const count = $("#collectionCount");
-    const results = $("#collectionResults");
-
-    if (!results) return;
-
-    count.textContent =
-      `${items.length} ${items.length === 1 ? "production" : "productions"}`;
-
-    if (!items.length) {
-      results.innerHTML = `
-        <div class="library-empty">
-          <span class="library-empty-symbol">✧</span>
-          <h3>Nothing among the stars yet.</h3>
-          <p>
-            ${state.archive.productions.length
-              ? "No productions match these filters."
-              : "Your personal productions will appear here once you begin adding them in Step 3."}
-          </p>
-        </div>
-      `;
-      return;
-    }
-
-    results.innerHTML = items.map(item => {
-      const rating = getRating(item);
-      const year = getReleaseYear(item);
-
-      return `
-        <button
-          type="button"
-          class="library-entry"
-          data-id="${escapeHTML(item.id)}"
-        >
-          <span class="library-entry-main">
-            <span class="library-entry-title">
-              ${escapeHTML(titleOf(item))}
-            </span>
-            <span class="library-entry-meta">
-              ${escapeHTML(item.mediaType || "Production")}
-              ${year == null ? "" : " · " + year}
-              ${item.status
-                ? " · " + escapeHTML(item.status)
-                : ""}
-            </span>
-          </span>
-
-          <span class="library-entry-rating">
-            ${rating == null ? "—" : rating.toFixed(1) + " / 10"}
-          </span>
-        </button>
-      `;
-    }).join("");
-
-    results.querySelectorAll(".library-entry")
-      .forEach(button => {
-        button.addEventListener("click", () => {
-          const node = nodes.find(n =>
-            n.type === "production" &&
-            n.id === button.dataset.id
-          );
-
-          closeOverlay();
-
-          if (node) focusNode(node);
-          else showToast("This production has no constellation position yet.");
-        });
-      });
-  }
-
-  function openCollection(type) {
-    if (!DATA.libraryViews[type]) return;
-
-    currentCollection = type;
-    collectionOptions = {
-      query: "",
-      sort: DATA.libraryViews[type].defaultSort,
-      genre: "",
-      mediaType: "",
-      status: ""
-    };
-
-    openDetail(
-      collectionHeader(type) + collectionToolbar()
-    );
-
-    $("#collectionSort").value = collectionOptions.sort;
-
-    const map = [
-      ["collectionSearch", "query"],
-      ["collectionSort", "sort"],
-      ["collectionGenre", "genre"],
-      ["collectionMedia", "mediaType"],
-      ["collectionStatus", "status"]
-    ];
-
-    for (const [id, key] of map) {
-      $("#" + id).addEventListener(
-        key === "query" ? "input" : "change",
-        e => {
-          collectionOptions[key] = e.target.value;
-          renderCollectionResults();
-        }
-      );
-    }
-
-    renderCollectionResults();
-  }
-
-  function selectStar(node) {
-    if (node.type === "navigation") {
-      if (node.action === "settings") {
-        openSettings();
-      } else {
-        openCollection(node.action);
-      }
-      return;
-    }
-
-    if (node.type === "episode") {
-      focusNode(node);
-      openEpisode(node);
-      return;
-    }
-
-    focusNode(node);
-  }
-
-  /* =====================================================
-     12. SEARCH THE ENTIRE SAVED ARCHIVE
-  ===================================================== */
-
-  function globalSearchItems(query) {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-
-    const types = [
-      ["groups", "Group"],
-      ["productions", "Production"],
-      ["seasons", "Season"],
-      ["episodes", "Episode"]
-    ];
-
-    const matches = [];
-
-    for (const [collection, label] of types) {
-      for (const item of state.archive[collection]) {
-        if (titleOf(item).toLowerCase().includes(q)) {
-          matches.push({ ...item, searchType: label });
-        }
-      }
-    }
-
-    return matches.slice(0, 60);
-  }
-
-  function renderSearchResults() {
-    const query = $("#globalSearch").value;
-    const results = $("#searchResults");
-
-    const matches = globalSearchItems(query);
-
-    if (!query.trim()) {
-      results.innerHTML = `
-        <p style="color:#8c89a4;font-size:12px;">
-          Search your saved groups, series, movies, seasons and episodes.
-        </p>
-      `;
-      return;
-    }
-
-    if (!matches.length) {
-      results.innerHTML = `
-        <p style="color:#8c89a4;font-size:12px;">
-          No matching entries were found.
-        </p>
-      `;
-      return;
-    }
-
-    results.innerHTML = matches.map(item => `
-      <button
-        type="button"
-        class="search-result"
-        data-id="${escapeHTML(item.id)}"
-      >
-        <span>${escapeHTML(titleOf(item))}</span>
-        <small>${escapeHTML(item.searchType)}</small>
-      </button>
-    `).join("");
-
-    results.querySelectorAll(".search-result")
-      .forEach(button => {
-        button.addEventListener("click", () => {
-          const node = nodeMap.get(button.dataset.id);
-          closeOverlay();
-
-          if (node) {
-            focusNode(node);
-          } else {
-            showToast("No constellation position available.");
-          }
-        });
-      });
-  }
-
-  /* =====================================================
-     13. TRANSIENT OVERLAYS
-  ===================================================== */
-
-  function openModal(overlay) {
-    if (activeModal && activeModal !== overlay) {
-      closeOverlay(false);
-    }
-
-    modalFocus = document.activeElement;
-    activeModal = overlay;
-
-    overlay.classList.add("open");
-    overlay.setAttribute("aria-hidden", "false");
-
-    viewport.inert = true;
-    $("#globalSearch")?.blur();
-  }
-
-  function openDetail(html) {
-    $("#detailContent").innerHTML = html;
-    $("#detailSheet").scrollTop = 0;
-
-    openModal(detailOverlay);
-    $("#closeDetailButton").focus();
-  }
-
-  function openSearch() {
-    openModal(searchOverlay);
-    $("#globalSearch").value = "";
-    renderSearchResults();
-    $("#globalSearch").focus();
-  }
-
-  function closeOverlay(restoreFocus = true) {
-    for (const overlay of [detailOverlay, searchOverlay]) {
-      overlay.classList.remove("open");
-      overlay.setAttribute("aria-hidden", "true");
-    }
-
-    activeModal = null;
-    currentCollection = null;
-    viewport.inert = false;
-
-    if (restoreFocus) {
-      if (modalFocus?.isConnected) {
-        modalFocus.focus();
-      } else {
-        viewport.focus();
-      }
-    }
-  }
-
-  function openEpisode(node) {
-    openDetail(`
-      <span class="detail-eyebrow">EPISODE</span>
-      <h2 id="detailTitle">${escapeHTML(node.title)}</h2>
-      <p>
-        ${escapeHTML(
-          node.data?.notes ||
-          node.data?.observations ||
-          "Episode observations and ratings will be added in Step 5 and Step 6."
-        )}
-      </p>
-    `);
-  }
-
-  /* =====================================================
-     14. SETTINGS
-  ===================================================== */
-
-  function settingRange(id, title, value, min = 0) {
-    return `
-      <div class="detail-row">
-        <label for="${id}">${title}</label>
-        <div>
-          <input
-            id="${id}"
-            class="setting-range"
-            type="range"
-            min="${min}"
-            max="100"
-            step="5"
-            value="${value}"
-          >
-          <output class="setting-value" id="${id}Value">
-            ${value}
-          </output>
-        </div>
-      </div>
-    `;
-  }
-
-  function openSettings() {
-    openDetail(`
-      <span class="detail-eyebrow">YOUR UNIVERSE</span>
-      <h2 id="detailTitle">Settings</h2>
-      <p>Adjust the atmosphere of your personal archive.</p>
-
-      <h3>Atmosphere</h3>
-
-      ${settingRange(
-        "settingDensity",
-        "Star density",
-        state.settings.starDensity,
-        10
-      )}
-
-      ${settingRange(
-        "settingBrightness",
-        "Star brightness",
-        state.settings.starBrightness,
-        10
-      )}
-
-      ${settingRange(
-        "settingNebula",
-        "Nebula intensity",
-        state.settings.nebulaIntensity
-      )}
-
-      ${settingRange(
-        "settingGlow",
-        "Constellation glow",
-        state.settings.constellationGlow
-      )}
-
-      <div class="detail-row">
-        <label for="settingMotion">Reduce motion</label>
-        <input
-          id="settingMotion"
-          class="motion-checkbox"
-          type="checkbox"
-          ${state.settings.reduceMotion ? "checked" : ""}
-        >
-      </div>
-
-      <h3>Storage & Backups</h3>
-
-      <p>
-        Your archive is saved in this browser.
-        Export a backup regularly to protect your records.
-      </p>
-
-      <button id="exportButton" class="detail-action">
-        Export archive ↗
-      </button>
-
-      <button id="importButton" class="detail-action">
-        Import archive ↙
-      </button>
-    `);
-
-    const ranges = [
-      ["settingDensity", "starDensity", () =>
-        backgroundRenderer.rebuild()
-      ],
-      ["settingBrightness", "starBrightness", () => {}],
-      ["settingNebula", "nebulaIntensity", () => {}],
-      ["settingGlow", "constellationGlow", () => {}]
-    ];
-
-    for (const [id, key, callback] of ranges) {
-      $("#" + id).addEventListener("input", e => {
-        state.settings[key] = Number(e.target.value);
-        $("#" + id + "Value").textContent = e.target.value;
-
-        callback();
-        saveStorage();
-        canvasDirty = true;
-      });
-    }
-
-    $("#settingMotion").addEventListener("change", e => {
-      state.settings.reduceMotion = e.target.checked;
-      applyMotionPreference();
-      saveStorage();
-    });
-
-    $("#exportButton").addEventListener(
-      "click", exportBackup
-    );
-
-    $("#importButton").addEventListener(
-      "click", () => $("#importFile").click()
-    );
-  }
-
-  /* =====================================================
-     15. EXPORT / IMPORT
-  ===================================================== */
-
-  function exportBackup() {
-    const backup = {
-      app: DATA.appName,
-      schemaVersion: DATA.schemaVersion,
-      exportedAt: new Date().toISOString(),
-      data: state
-    };
-
-    const blob = new Blob(
-      [JSON.stringify(backup, null, 2)],
-      { type: "application/json" }
-    );
-
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-
-    anchor.href = url;
-    anchor.download =
-      `watch-archive-${new Date().toISOString().slice(0,10)}.json`;
-
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-    showToast("Backup prepared.");
-  }
-
-  async function importBackup(file) {
-    if (!file) return;
-
-    try {
-      const text = await file.text();
-      const backup = JSON.parse(text);
-
-      if (
-        backup.app !== DATA.appName ||
-        backup.schemaVersion !== DATA.schemaVersion ||
-        !backup.data?.archive ||
-        !["groups", "productions", "seasons", "episodes"]
-          .every(key =>
-            Array.isArray(backup.data.archive[key])
-          )
-      ) {
-        throw new Error("Invalid backup structure");
-      }
-
-      if (!confirm(
-        "Replace your current local archive with this backup?\n" +
-        "Export your existing archive first if you want to keep it."
-      )) return;
-
-      const previous = state;
-      state = normalizeState(backup.data);
-
-      if (!saveStorage()) {
-        state = previous;
-        return;
-      }
-
-      closeOverlay();
-
-      backgroundRenderer.rebuild();
-      rebuildUniverse();
-      applyMotionPreference();
-      goHome();
-
-      showToast("Archive imported.");
-
-    } catch (error) {
-      console.error("Import failed:", error);
-      showToast("Invalid or incompatible archive file.");
-    } finally {
-      $("#importFile").value = "";
-    }
-  }
-
-  /* =====================================================
-     16. CONTROLS & LIFECYCLE
-  ===================================================== */
+  /* ======================================================
+     GLOBAL CONTROLS
+  ====================================================== */
 
   function bindControls() {
-    $("#homeButton").addEventListener("click", goHome);
+    $("#homeButton").onclick=goHome;
 
-    $("#focusButton").addEventListener("click", () => {
-      if (lastFocus) {
-        focusNode(lastFocus);
-      } else {
-        const closest = nodes
-          .filter(n => n.visible > .6)
-          .map(n => ({
-            node: n,
-            distance: Math.hypot(
-              n.screenX - width / 2,
-              n.screenY - height / 2
-            )
-          }))
-          .sort((a, b) => a.distance - b.distance)[0];
+    $("#focusButton").onclick=()=>{
+      if (focusedNode) focusNode(focusedNode);
+      else goHome();
+    };
 
-        if (closest) focusNode(closest.node);
-        else goHome();
-      }
-    });
+    $("#searchButton").onclick=openSearch;
 
-    $("#searchButton").addEventListener(
-      "click", openSearch
-    );
+    $("#closeDetailButton").onclick=closeOverlay;
+    $("#detailBackdrop").onclick=closeOverlay;
 
-    $("#closeDetailButton").addEventListener(
-      "click", () => closeOverlay()
-    );
+    $("#closeEditorButton").onclick=closeOverlay;
+    $("#editorBackdrop").onclick=closeOverlay;
 
-    $("#detailBackdrop").addEventListener(
-      "click", () => closeOverlay()
-    );
+    $("#closeSearchButton").onclick=closeOverlay;
+    $("#searchBackdrop").onclick=closeOverlay;
 
-    $("#closeSearchButton").addEventListener(
-      "click", () => closeOverlay()
-    );
+    $("#globalSearch").oninput=renderSearch;
 
-    $("#searchBackdrop").addEventListener(
-      "click", () => closeOverlay()
-    );
+    $("#cancelConfirmButton").onclick=closeConfirm;
 
-    $("#globalSearch").addEventListener(
-      "input", renderSearchResults
-    );
+    $("#acceptConfirmButton").onclick=()=>{
+      const action=confirmCallback;
+      closeConfirm();
+      if (action) action();
+    };
 
-    $("#importFile").addEventListener("change", e => {
+    $("#importFile").onchange=e=>
       importBackup(e.target.files?.[0]);
-    });
 
-    window.addEventListener("keydown", e => {
-      if (e.key === "Escape" && activeModal) {
-        closeOverlay();
+    window.addEventListener("keydown",e=>{
+      if (e.key==="Escape") {
+        if (confirmOverlay.classList.contains("open")) {
+          closeConfirm();
+        } else {
+          closeOverlay();
+        }
       }
     });
 
     let resizeTimer;
 
-    window.addEventListener("resize", () => {
+    window.addEventListener("resize",()=>{
       clearTimeout(resizeTimer);
 
-      resizeTimer = setTimeout(() => {
-        const wasMobile = width < 650;
-        const nowMobile = innerWidth < 650;
+      resizeTimer=setTimeout(()=>{
+        const oldMobile=width<650;
+        const newMobile=innerWidth<650;
 
-        resizeAllCanvases();
+        resizeGraphics();
 
-        if (wasMobile !== nowMobile) {
+        if (oldMobile!==newMobile) {
           rebuildUniverse();
-          goHome();
         }
-
-        canvasDirty = true;
-      }, 150);
+      },160);
     });
 
-    document.addEventListener(
-      "visibilitychange",
-      () => {
-        if (document.hidden) {
-          stopRenderLoop();
-        } else {
-          lastFrameTime = 0;
-          canvasDirty = true;
-          startRenderLoop();
-        }
-      }
-    );
+    document.addEventListener("visibilitychange",()=>{
+      if (document.hidden) stopLoop();
+      else startLoop();
+    });
 
-    reducedMedia.addEventListener(
-      "change",
-      applyMotionPreference
-    );
+    reduceMedia.addEventListener("change",applyMotion);
 
-    window.addEventListener("storage", e => {
-      if (e.key !== DATA.storageKey) return;
+    window.addEventListener("storage",e=>{
+      if (e.key!==DATA.storageKey) return;
 
-      state = readStorage();
+      state=loadState();
       rebuildUniverse();
-      backgroundRenderer.rebuild();
-      applyMotionPreference();
-
-      showToast("Archive refreshed from another tab.");
+      rebuildBackgroundStars();
+      notify("Archive updated from another tab.");
     });
   }
 
-  /* =====================================================
-     17. INITIALIZATION
-  ===================================================== */
+  /* ======================================================
+     INITIALIZATION
+  ====================================================== */
 
   function initialize() {
-    applyMotionPreference();
-
-    resizeAllCanvases();
+    applyMotion();
+    resizeGraphics();
     rebuildUniverse();
 
     bindGestures();
     bindControls();
 
-    const initial = fitNavigation();
+    const start=homeCamera();
+    setCamera(start.x,start.y,start.zoom);
 
-    setCamera(
-      initial.x,
-      initial.y,
-      initial.zoom
-    );
-
-    startRenderLoop();
+    startLoop();
 
     if (!localStorage.getItem(DATA.storageKey)) {
-      saveStorage();
+      saveState();
     }
   }
 
