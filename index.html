@@ -1,1 +1,275 @@
+<!DOCTYPE html>
 
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+  <meta name="theme-color" content="#05060c">
+
+  <meta name="color-scheme" content="dark">
+
+  <meta name="description" content="A private archive of everything I've watched.">
+
+  <title>Watch Archive</title>
+
+  <link rel="stylesheet" href="./style.css">
+
+  <script src="./data.js" defer></script>
+
+  <script src="./app.js" defer></script>
+
+</head>
+
+<body>
+
+  <!-- BACKGROUND -->
+
+  <div class="universe" aria-hidden="true">
+
+    <div class="space-base"></div>
+
+    <div class="nebula nebula-one"></div>
+
+    <div class="nebula nebula-two"></div>
+
+    <div class="space-vignette"></div>
+
+    <canvas id="starfield"></canvas>
+
+  </div>
+
+  <!-- APPLICATION -->
+
+  <div class="app-shell">
+
+    <!-- DESKTOP NAVIGATION -->
+
+    <aside class="sidebar">
+
+      <a class="brand" href="#library" aria-label="Watch Archive home">
+
+        <span class="brand-symbol">✧</span>
+
+        <span class="brand-text">
+
+          <strong>WATCH ARCHIVE</strong>
+
+          <small>A private universe</small>
+
+        </span>
+
+      </a>
+
+      <div class="sidebar-section-label">EXPLORE</div>
+
+      <nav class="side-navigation" aria-label="Main navigation">
+
+        <a href="#library" data-page="library" class="nav-link">
+
+          <span class="nav-symbol">◇</span>
+
+          <span>Library</span>
+
+        </a>
+
+        <a href="#groups" data-page="groups" class="nav-link">
+
+          <span class="nav-symbol">◈</span>
+
+          <span>Groups</span>
+
+        </a>
+
+        <a href="#rankings" data-page="rankings" class="nav-link">
+
+          <span class="nav-symbol">✦</span>
+
+          <span>Rankings</span>
+
+        </a>
+
+        <a href="#history" data-page="history" class="nav-link">
+
+          <span class="nav-symbol">◷</span>
+
+          <span>History</span>
+
+        </a>
+
+      </nav>
+
+      <div class="sidebar-bottom">
+
+        <div class="sidebar-divider"></div>
+
+        <a href="#settings" data-page="settings" class="nav-link">
+
+          <span class="nav-symbol">⚙</span>
+
+          <span>Settings</span>
+
+        </a>
+
+        <div class="sidebar-caption">
+
+          YOUR OWN LITTLE CORNER
+
+          <br>
+
+          OF THE UNIVERSE
+
+        </div>
+
+      </div>
+
+    </aside>
+
+    <!-- MAIN CONTENT -->
+
+    <div class="main-shell">
+
+      <header class="topbar">
+
+        <div class="breadcrumb" id="breadcrumb">
+
+          <span>Archive</span>
+
+          <span class="breadcrumb-divider">/</span>
+
+          <strong>Library</strong>
+
+        </div>
+
+        <div class="topbar-actions">
+
+          <span class="save-indicator" id="saveIndicator">
+
+            <span class="save-dot"></span>
+
+            Saved locally
+
+          </span>
+
+          <button
+
+            type="button"
+
+            class="icon-button settings-shortcut"
+
+            id="settingsShortcut"
+
+            aria-label="Open settings"
+
+          >
+
+            ⚙
+
+          </button>
+
+        </div>
+
+      </header>
+
+      <main class="main-content" id="mainContent" tabindex="-1">
+
+        <div id="pageContent" class="page-content"></div>
+
+      </main>
+
+      <footer class="desktop-footer">
+
+        <span>AN ARCHIVE OF WORLDS, STORIES & MEMORIES</span>
+
+        <span id="footerVersion">V1.0</span>
+
+      </footer>
+
+    </div>
+
+  </div>
+
+  <!-- MOBILE NAVIGATION -->
+
+  <nav class="mobile-navigation" aria-label="Mobile navigation">
+
+    <a href="#library" data-page="library" class="mobile-link">
+
+      <span class="mobile-symbol">◇</span>
+
+      <span>Library</span>
+
+    </a>
+
+    <a href="#groups" data-page="groups" class="mobile-link">
+
+      <span class="mobile-symbol">◈</span>
+
+      <span>Groups</span>
+
+    </a>
+
+    <a href="#rankings" data-page="rankings" class="mobile-link">
+
+      <span class="mobile-symbol">✦</span>
+
+      <span>Ratings</span>
+
+    </a>
+
+    <a href="#history" data-page="history" class="mobile-link">
+
+      <span class="mobile-symbol">◷</span>
+
+      <span>History</span>
+
+    </a>
+
+    <a href="#settings" data-page="settings" class="mobile-link">
+
+      <span class="mobile-symbol">⚙</span>
+
+      <span>Settings</span>
+
+    </a>
+
+  </nav>
+
+  <!-- NOTIFICATIONS -->
+
+  <div
+
+    class="toast-container"
+
+    id="toastContainer"
+
+    role="status"
+
+    aria-live="polite"
+
+  ></div>
+
+  <!-- IMPORT -->
+
+  <input
+
+    type="file"
+
+    id="importFile"
+
+    accept=".json,application/json"
+
+    hidden
+
+  >
+
+  <!-- BACKDROP FOR FUTURE DIALOGS -->
+
+  <div id="modalRoot"></div>
+
+</body>
+
+</html>
