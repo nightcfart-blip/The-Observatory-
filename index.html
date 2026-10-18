@@ -14,7 +14,7 @@
 
   <meta
     name="description"
-    content="A private celestial archive of films, series, seasons and episodes."
+    content="A private celestial archive of films, series, seasons and stories."
   >
 
   <title>Watch Archive — Universe</title>
@@ -27,19 +27,21 @@
 
 <body>
 
-  <!-- COSMIC BACKGROUND -->
+  <!-- =====================================
+       OUTER SPACE
+  ====================================== -->
 
   <div class="universe" aria-hidden="true">
     <div class="space-base"></div>
-
     <canvas id="nebulaCanvas"></canvas>
     <canvas id="backgroundStars"></canvas>
-
     <div class="space-vignette"></div>
   </div>
 
 
-  <!-- CONTINUOUS CELESTIAL WORLD -->
+  <!-- =====================================
+       CONTINUOUS CONSTELLATION WORLD
+  ====================================== -->
 
   <main
     id="viewport"
@@ -47,7 +49,6 @@
     tabindex="0"
     aria-label="Explore your celestial archive"
   >
-
     <canvas
       id="constellationCanvas"
       class="constellation-canvas"
@@ -59,14 +60,17 @@
       class="star-layer"
       aria-label="Interactive constellation stars"
     ></div>
-
   </main>
 
 
-  <!-- MINIMAL CONTROLS -->
+  <!-- =====================================
+       MINIMAL WORLD CONTROLS
+  ====================================== -->
 
-  <nav class="universe-controls" aria-label="Universe tools">
-
+  <nav
+    class="universe-controls"
+    aria-label="Universe tools"
+  >
     <button
       id="homeButton"
       class="minimal-control"
@@ -79,8 +83,8 @@
       id="focusButton"
       class="minimal-control"
       type="button"
-      aria-label="Focus on nearest star"
-      title="Focus on nearest star"
+      aria-label="Focus on selected star"
+      title="Focus on selected star"
     >⌾</button>
 
     <button
@@ -90,25 +94,310 @@
       aria-label="Search archive"
       title="Search archive"
     >
-      <svg viewBox="0 0 24 24" width="20" height="20"
-        fill="none" stroke="currentColor"
-        stroke-width="1.4" stroke-linecap="round">
+      <svg
+        viewBox="0 0 24 24"
+        width="20"
+        height="20"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+      >
         <circle cx="10.5" cy="10.5" r="6.5"></circle>
         <path d="M15.5 15.5L21 21"></path>
       </svg>
     </button>
-
   </nav>
 
 
-  <!-- SEARCH -->
+  <!-- =====================================
+       GROUP / PRODUCTION PAGE
+       Uses the original page sketches.
+  ====================================== -->
+
+  <div
+    id="pageOverlay"
+    class="page-overlay"
+    aria-hidden="true"
+  >
+    <div
+      id="pageBackdrop"
+      class="page-backdrop"
+    ></div>
+
+    <article
+      id="archivePage"
+      class="archive-page"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pageTitle"
+      tabindex="-1"
+    >
+
+      <!-- Minimal floating controls -->
+      <div class="page-floating-controls">
+        <button
+          id="pageBackButton"
+          class="page-icon-button"
+          type="button"
+          aria-label="Go back"
+          title="Back"
+        >←</button>
+
+        <div class="page-floating-right">
+          <button
+            id="pageEditButton"
+            class="page-icon-button"
+            type="button"
+            aria-label="Edit this entry"
+            title="Edit"
+          >
+            <svg viewBox="0 0 24 24" width="19" height="19"
+              fill="none" stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M12 20h9"></path>
+              <path d="M16.5 3.5l4 4L9 19H5v-4z"></path>
+            </svg>
+          </button>
+
+          <button
+            id="pageCloseButton"
+            class="page-icon-button"
+            type="button"
+            aria-label="Return to universe"
+            title="Return to universe"
+          >×</button>
+        </div>
+      </div>
+
+
+      <!-- FULLY FADING BANNER -->
+      <div
+        id="pageHero"
+        class="page-hero"
+      >
+        <div
+          id="pageBanner"
+          class="page-banner"
+          role="img"
+          aria-label="Archive banner"
+        ></div>
+
+        <div class="page-banner-shade"></div>
+        <div class="page-banner-fade"></div>
+
+        <!-- 3D paperclip for production status -->
+        <div
+          id="statusPaperclip"
+          class="status-paperclip"
+          data-status="planned"
+          hidden
+          aria-label="Watching status"
+        >
+          <svg
+            class="paperclip-svg"
+            viewBox="0 0 82 166"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <defs>
+              <linearGradient
+                id="clipMetal"
+                x1="0" y1="0" x2="1" y2="1"
+              >
+                <stop offset="0" stop-color="#f2f3f9"/>
+                <stop offset=".18" stop-color="#8589a5"/>
+                <stop offset=".37" stop-color="#eef0f9"/>
+                <stop offset=".63" stop-color="#6f748e"/>
+                <stop offset=".84" stop-color="#d6d9ed"/>
+                <stop offset="1" stop-color="#6a6b83"/>
+              </linearGradient>
+
+              <linearGradient
+                id="clipEdge"
+                x1="0" y1="0" x2="1" y2="0"
+              >
+                <stop offset="0" stop-color="#55596e"/>
+                <stop offset=".5" stop-color="#f4f5ff"/>
+                <stop offset="1" stop-color="#797c97"/>
+              </linearGradient>
+
+              <filter
+                id="clipShadow"
+                x="-60%" y="-30%"
+                width="220%" height="190%"
+              >
+                <feGaussianBlur stdDeviation="4"/>
+              </filter>
+            </defs>
+
+            <path
+              d="M42 9 C24 9 14 23 14 43
+                 L14 126 C14 147 27 157 43 155
+                 C59 153 67 140 67 124
+                 L67 45 C67 33 59 25 49 25
+                 C38 25 32 34 32 47
+                 L32 116 C32 123 36 128 42 128
+                 C48 128 51 123 51 117
+                 L51 54"
+              fill="none"
+              stroke="#000"
+              stroke-width="12"
+              opacity=".36"
+              filter="url(#clipShadow)"
+              transform="translate(3 4)"
+            />
+
+            <path
+              d="M42 9 C24 9 14 23 14 43
+                 L14 126 C14 147 27 157 43 155
+                 C59 153 67 140 67 124
+                 L67 45 C67 33 59 25 49 25
+                 C38 25 32 34 32 47
+                 L32 116 C32 123 36 128 42 128
+                 C48 128 51 123 51 117
+                 L51 54"
+              fill="none"
+              stroke="url(#clipMetal)"
+              stroke-width="8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+
+            <path
+              d="M42 9 C24 9 14 23 14 43
+                 L14 126 C14 147 27 157 43 155"
+              fill="none"
+              stroke="url(#clipEdge)"
+              stroke-width="2"
+              stroke-linecap="round"
+              opacity=".85"
+            />
+
+            <g transform="translate(15 59)">
+              <path
+                class="clip-gem"
+                d="M0 -11 L10 -5 L12 6 L0 15
+                   L-12 6 L-10 -5 Z"
+              />
+              <path
+                d="M0 -11 L0 15 M-12 6 L10 -5
+                   M12 6 L-10 -5"
+                fill="none"
+                stroke="#fff"
+                stroke-opacity=".26"
+                stroke-width=".8"
+              />
+            </g>
+          </svg>
+        </div>
+      </div>
+
+
+      <!-- PAGE BODY -->
+      <div class="page-content">
+
+        <header class="page-heading">
+          <div class="page-heading-main">
+            <span
+              id="pageType"
+              class="page-type"
+            ></span>
+
+            <h1 id="pageTitle"></h1>
+
+            <div
+              id="pageRating"
+              class="page-rating"
+              aria-label="Average rating"
+            ></div>
+          </div>
+
+          <div
+            id="pageQuickMeta"
+            class="page-quick-meta"
+          ></div>
+        </header>
+
+
+        <!-- GENRE INFORMATION -->
+        <section
+          class="page-taxonomy"
+          aria-label="Genres"
+        >
+          <div
+            id="pageMainGenres"
+            class="page-main-genres"
+          ></div>
+
+          <div
+            id="pageSecondaryGenres"
+            class="page-secondary-genres"
+          ></div>
+        </section>
+
+
+        <!-- UNNAMED OBSERVATIONS -->
+        <section
+          class="observations"
+          aria-label="Personal observations"
+        >
+          <div
+            id="pageNotes"
+            class="observations-text"
+          ></div>
+        </section>
+
+
+        <!-- CHILD PRODUCTIONS / SEASONS -->
+        <section
+          id="pageChildrenSection"
+          class="page-children-section"
+          aria-label="Contained entries"
+        >
+          <div class="children-heading">
+            <span
+              id="pageChildrenCount"
+              class="children-count"
+            ></span>
+
+            <button
+              id="pageAddChildButton"
+              class="children-add"
+              type="button"
+              aria-label="Add child entry"
+            >+</button>
+          </div>
+
+          <div
+            id="pageChildren"
+            class="page-children"
+          ></div>
+        </section>
+
+
+        <div class="page-bottom-space"></div>
+      </div>
+
+    </article>
+  </div>
+
+
+  <!-- =====================================
+       SEARCH
+  ====================================== -->
 
   <div
     id="searchOverlay"
     class="overlay search-overlay"
     aria-hidden="true"
   >
-    <div id="searchBackdrop" class="overlay-backdrop"></div>
+    <div
+      id="searchBackdrop"
+      class="overlay-backdrop"
+    ></div>
 
     <section
       class="search-panel"
@@ -119,6 +408,7 @@
     >
       <div class="panel-topline">
         <h2 id="searchHeading">Find a story</h2>
+
         <button
           id="closeSearchButton"
           class="close-button"
@@ -127,9 +417,10 @@
         >×</button>
       </div>
 
-      <label class="visually-hidden" for="globalSearch">
-        Search titles
-      </label>
+      <label
+        for="globalSearch"
+        class="visually-hidden"
+      >Search titles</label>
 
       <input
         id="globalSearch"
@@ -149,14 +440,19 @@
   </div>
 
 
-  <!-- LIBRARY, DETAILS, GENRES & SETTINGS -->
+  <!-- =====================================
+       LIBRARY / SETTINGS / GENRES
+  ====================================== -->
 
   <div
     id="detailOverlay"
     class="overlay detail-overlay"
     aria-hidden="true"
   >
-    <div id="detailBackdrop" class="overlay-backdrop"></div>
+    <div
+      id="detailBackdrop"
+      class="overlay-backdrop"
+    ></div>
 
     <section
       id="detailSheet"
@@ -170,22 +466,30 @@
         id="closeDetailButton"
         class="close-button detail-close"
         type="button"
-        aria-label="Close details"
+        aria-label="Close panel"
       >×</button>
 
-      <div id="detailContent" class="detail-content"></div>
+      <div
+        id="detailContent"
+        class="detail-content"
+      ></div>
     </section>
   </div>
 
 
-  <!-- CREATE & EDIT PANEL -->
+  <!-- =====================================
+       CREATE & EDIT
+  ====================================== -->
 
   <div
     id="editorOverlay"
     class="overlay editor-overlay"
     aria-hidden="true"
   >
-    <div id="editorBackdrop" class="overlay-backdrop"></div>
+    <div
+      id="editorBackdrop"
+      class="overlay-backdrop"
+    ></div>
 
     <section
       id="editorSheet"
@@ -197,9 +501,11 @@
     >
       <div class="editor-header">
         <div>
-          <span id="editorEyebrow" class="panel-eyebrow">
-            YOUR ARCHIVE
-          </span>
+          <span
+            id="editorEyebrow"
+            class="panel-eyebrow"
+          >YOUR ARCHIVE</span>
+
           <h2 id="editorTitle">Create & Edit</h2>
         </div>
 
@@ -219,7 +525,23 @@
   </div>
 
 
-  <!-- CONFIRMATION DIALOG -->
+  <!-- =====================================
+       IMAGE UPLOAD PREVIEW
+
+       Selection from phone gallery.
+  ====================================== -->
+
+  <input
+    id="bannerFileInput"
+    type="file"
+    accept="image/*"
+    hidden
+  >
+
+
+  <!-- =====================================
+       DELETION CONFIRMATION
+  ====================================== -->
 
   <div
     id="confirmOverlay"
@@ -256,7 +578,9 @@
   </div>
 
 
-  <!-- BACKUP IMPORT -->
+  <!-- =====================================
+       BACKUP IMPORT
+  ====================================== -->
 
   <input
     id="importFile"
@@ -266,7 +590,9 @@
   >
 
 
-  <!-- NOTIFICATIONS -->
+  <!-- =====================================
+       NOTIFICATIONS
+  ====================================== -->
 
   <div
     id="toast"
