@@ -1,38 +1,30 @@
 
 "use strict";
 
-/* =====================================================
-   WATCH ARCHIVE — STEP 1C.1
-   THE LIVING UNIVERSE
+/* =========================================================
+   WATCH ARCHIVE — STEP 2
+   THE COSMIC LIBRARY
 
-   One world.
-   One camera.
-   Continuous constellations.
-   No page changes or scene cuts.
-===================================================== */
+   Continuous world-space navigation
+   Screen-space labels
+   Smooth camera and semantic zoom
+   Procedural astronomical background
+   Production-only collection browsing
+   Mobile-first touch interactions
+========================================================= */
 
 (() => {
-
   const DATA = window.WATCH_DATA;
-
   if (!DATA) {
     console.error("Watch Archive: data.js is missing.");
     return;
   }
 
-  const $ = selector => document.querySelector(selector);
-
-  const $$ = selector =>
-    [...document.querySelectorAll(selector)];
-
-  const clone = value =>
-    JSON.parse(JSON.stringify(value));
-
-  const clamp = (value, min, max) =>
-    Math.max(min, Math.min(max, value));
-
-  const lerp = (a, b, t) =>
-    a + (b - a) * t;
+  const $ = s => document.querySelector(s);
+  const $$ = s => [...document.querySelectorAll(s)];
+  const clone = v => JSON.parse(JSON.stringify(v));
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
 
   const smoothstep = (a, b, value) => {
     const t = clamp((value - a) / (b - a), 0, 1);
@@ -40,137 +32,157 @@
   };
 
   const viewport = $("#viewport");
-  const world = $("#world");
   const starLayer = $("#starLayer");
-  const lineLayer = $("#connectionLayer");
+  const starCanvas = $("#constellationCanvas");
+  const nebulaCanvas = $("#nebulaCanvas");
+  const backgroundCanvas = $("#backgroundStars");
 
   const detailOverlay = $("#detailOverlay");
-  const detailContent = $("#detailContent");
+  const searchOverlay = $("#searchOverlay");
 
-  const MIN_ZOOM = DATA.camera.minZoom;
-  const MAX_ZOOM = DATA.camera.maxZoom;
+  const cameraConfig = DATA.camera;
+  const MIN_ZOOM = cameraConfig.minZoom;
+  const MAX_ZOOM = cameraConfig.maxZoom;
 
-  const motionPreference = matchMedia(
+  const reducedMedia = matchMedia(
     "(prefers-reduced-motion: reduce)"
   );
 
-  let state = loadState();
+  let state = readStorage();
 
-  let allNodes = [];
-  let allLines = [];
-  let nodeLookup = new Map();
+  let nodes = [];
+  let connections = [];
+  let nodeMap = new Map();
+  let selectedId = null;
+  let lastFocus = null;
 
-  let background = null;
+  let modalFocus = null;
+  let toastTimer = null;
+  let activeModal = null;
 
-  let cameraFrame = null;
-  let cameraAnimationToken = 0;
-
-  let lastFocusedNode = null;
-  let previousModalFocus = null;
-  let toastTimeout = null;
+  let currentCollection = null;
+  let collectionOptions = {
+    query: "",
+    sort: "alphabetical",
+    genre: "",
+    mediaType: "",
+    status: ""
+  };
 
   const camera = {
     x: 0,
     y: 0,
-    zoom: DATA.camera.initialZoom
+    zoom: cameraConfig.initialZoom
   };
 
-  const activePointers = new Map();
+  const targetCamera = { ...camera };
 
+  let cameraAnimating = false;
+  let cameraStart = null;
+  let cameraEnd = null;
+  let cameraStartTime = 0;
+  let cameraDuration = cameraConfig.travelDuration;
+
+  const pointers = new Map();
   let gesture = null;
-  let gestureMoved = false;
   let suppressClickUntil = 0;
 
+  let width = innerWidth;
+  let height = innerHeight;
+  let dpr = 1;
+
+  let canvasDirty = true;
+  let lastFrameTime = 0;
+  let animationFrame = null;
+  let running = false;
+
   /* =====================================================
-     1. LOCAL STORAGE
+     1. STORAGE
   ===================================================== */
 
   function initialState() {
-    const now = new Date().toISOString();
+    const time = new Date().toISOString();
 
     return {
       schemaVersion: DATA.schemaVersion,
-      createdAt: now,
-      updatedAt: now,
-
+      createdAt: time,
+      updatedAt: time,
       settings: clone(DATA.defaults.settings),
       archive: clone(DATA.defaults.archive)
     };
   }
 
-  function normalizeState(input) {
-    const defaults = initialState();
+  function validNumber(value, fallback, min, max) {
+    if (value == null || value === "") return fallback;
+    const n = Number(value);
+    return Number.isFinite(n)
+      ? clamp(n, min, max)
+      : fallback;
+  }
 
+  function normalizeState(input) {
+    const base = initialState();
     const settings = input?.settings || {};
     const archive = input?.archive || {};
 
     return {
-      ...defaults,
+      ...base,
       ...(input || {}),
-
       schemaVersion: DATA.schemaVersion,
 
       settings: {
-        ...defaults.settings,
+        ...base.settings,
         ...settings,
-
-        starDensity: clamp(
-          Number(settings.starDensity) || 65,
-          10, 100
+        starDensity: validNumber(
+          settings.starDensity, 75, 10, 100
         ),
-
-        starBrightness: clamp(
-          Number(settings.starBrightness) || 55,
-          10, 100
+        starBrightness: validNumber(
+          settings.starBrightness, 60, 10, 100
         ),
-
-        reduceMotion:
-          settings.reduceMotion === true
+        nebulaIntensity: validNumber(
+          settings.nebulaIntensity, 65, 0, 100
+        ),
+        constellationGlow: validNumber(
+          settings.constellationGlow, 65, 0, 100
+        ),
+        reduceMotion: settings.reduceMotion === true
       },
 
       archive: {
         ...archive,
-
         groups: Array.isArray(archive.groups)
           ? archive.groups : [],
-
         productions: Array.isArray(archive.productions)
           ? archive.productions : [],
-
         seasons: Array.isArray(archive.seasons)
           ? archive.seasons : [],
-
         episodes: Array.isArray(archive.episodes)
           ? archive.episodes : []
       }
     };
   }
 
-  function loadState() {
+  function readStorage() {
     try {
       const raw = localStorage.getItem(DATA.storageKey);
-
       if (!raw) return initialState();
 
       const parsed = JSON.parse(raw);
 
       if (parsed.schemaVersion !== DATA.schemaVersion) {
-        console.warn(
-          "Different archive schema. Existing data is untouched."
-        );
-
+        console.warn("Archive schema differs; saved data was not overwritten.");
         return initialState();
       }
 
       return normalizeState(parsed);
-
     } catch (error) {
-      console.error("Could not load archive:", error);
+      console.error("Storage could not be read:", error);
       return initialState();
     }
   }
 
-  function saveState() {
+  function saveStorage() {
+    const previousTime = state.updatedAt;
     state.updatedAt = new Date().toISOString();
 
     try {
@@ -178,256 +190,325 @@
         DATA.storageKey,
         JSON.stringify(state)
       );
-
       return true;
-
     } catch (error) {
-      console.error("Could not save archive:", error);
-
-      notify("Local saving failed.");
-
+      state.updatedAt = previousTime;
+      console.error("Saving failed:", error);
+      showToast("Unable to save locally.");
       return false;
     }
   }
 
-  function motionReduced() {
-    return (
-      state.settings.reduceMotion ||
-      motionPreference.matches
-    );
+  function reducedMotion() {
+    return state.settings.reduceMotion ||
+      reducedMedia.matches;
   }
 
-  function applyMotionSettings() {
+  function applyMotionPreference() {
     document.body.classList.toggle(
       "reduce-motion",
-      motionReduced()
+      reducedMotion()
     );
+    canvasDirty = true;
   }
 
-  /* =====================================================
-     2. NOTIFICATIONS
-  ===================================================== */
+  function showToast(message) {
+    const toast = $("#toast");
+    toast.textContent = message;
+    toast.classList.add("show");
 
-  function notify(message) {
-    const element = $("#toast");
-
-    if (!element) return;
-
-    element.textContent = message;
-    element.classList.add("show");
-
-    clearTimeout(toastTimeout);
-
-    toastTimeout = setTimeout(() => {
-      element.classList.remove("show");
-    }, 3000);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(
+      () => toast.classList.remove("show"),
+      3100
+    );
   }
 
   function escapeHTML(value) {
-    return String(value ?? "").replace(
-      /[&<>"']/g,
-      character => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-      })[character]
-    );
+    return String(value ?? "").replace(/[&<>"']/g, ch => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[ch]);
   }
-
-  /* =====================================================
-     3. DETERMINISTIC POSITIONS
-
-     The same object always receives the same position.
-     Reloading does not randomly rearrange the archive.
-  ===================================================== */
 
   function hashString(value) {
-    let hash = 2166136261;
+    let h = 2166136261;
 
-    for (let i = 0; i < value.length; i++) {
-      hash ^= value.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
+    for (const ch of String(value)) {
+      h ^= ch.charCodeAt(0);
+      h = Math.imul(h, 16777619);
     }
 
-    return hash >>> 0;
+    return h >>> 0;
   }
 
-  function seededValue(seed) {
+  function seeded(seed) {
     let t = seed + 0x6D2B79F5;
-
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-
-    return (
-      ((t ^ (t >>> 14)) >>> 0) / 4294967296
-    );
-  }
-
-  function positionForGroup(item, index) {
-    const givenX = Number(item.mapX ?? item.x);
-    const givenY = Number(item.mapY ?? item.y);
-
-    if (
-      (item.mapX != null || item.x != null) &&
-      (item.mapY != null || item.y != null) &&
-      Number.isFinite(givenX) &&
-      Number.isFinite(givenY)
-    ) {
-      return { x: givenX, y: givenY };
-    }
-
-    const seed = hashString(
-      String(item.id || item.title || index)
-    );
-
-    const angle =
-      index * 2.399963229728653 +
-      seededValue(seed) * .4;
-
-    const radius =
-      DATA.groupPlacement.preferredDistance +
-      Math.sqrt(index) *
-      DATA.groupPlacement.minimumDistanceBetweenGroups;
-
-    return {
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius
-    };
-  }
-
-  function childOffset(item, index, count, type) {
-    const radii = {
-      production: 205,
-      season: 98,
-      episode: 43
-    };
-
-    const baseRadius = radii[type] || 130;
-
-    const seed = hashString(
-      String(item.id || item.title || index)
-    );
-
-    const offset =
-      (seededValue(seed) - .5) * .32;
-
-    if (count === 1) {
-      return {
-        x: baseRadius * .65,
-        y: -baseRadius * .45
-      };
-    }
-
-    const angle =
-      -Math.PI / 2 +
-      index * (Math.PI * 2 / count) +
-      offset;
-
-    const irregularity =
-      .82 + seededValue(seed + 37) * .36;
-
-    const radius =
-      baseRadius *
-      irregularity *
-      (count > 8 ? 1 + (count - 8) * .035 : 1);
-
-    return {
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius
-    };
-  }
-
-  function mobileNavigationScale() {
-    return innerWidth <= 650 ? .57 : 1;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
   /* =====================================================
-     4. BUILD THE SINGLE UNIVERSE TREE
-
-     All coordinates are absolute world coordinates.
-
-     Parent constellations and their children coexist.
-     Nothing is removed when navigating or zooming.
+     2. CAMERA COORDINATES
   ===================================================== */
 
-  function makeNode({
-    id,
-    title,
-    type,
-    x,
-    y,
-    parentId = null,
-    depth = 0,
-    demo = false,
-    data = null,
-    action = null,
-    size = null
-  }) {
+  function worldToScreen(x, y) {
     return {
-      id: String(id),
-      title: String(title || "Untitled"),
-      type,
-      x,
-      y,
-      parentId,
-      depth,
-      demo,
-      data,
-      action,
-
-      size: size || 8,
-      element: null,
-
-      visible: 0
+      x: width / 2 + (x - camera.x) * camera.zoom,
+      y: height / 2 + (y - camera.y) * camera.zoom
     };
   }
 
-  function appendNode(node) {
-    if (nodeLookup.has(node.id)) return false;
+  function screenToWorld(x, y) {
+    return {
+      x: camera.x + (x - width / 2) / camera.zoom,
+      y: camera.y + (y - height / 2) / camera.zoom
+    };
+  }
 
-    allNodes.push(node);
-    nodeLookup.set(node.id, node);
+  function stopCameraAnimation() {
+    cameraAnimating = false;
+    cameraStart = null;
+    cameraEnd = null;
+  }
 
+  function setCamera(x, y, zoom) {
+    camera.x = x;
+    camera.y = y;
+    camera.zoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+    canvasDirty = true;
+  }
+
+  function moveCamera(target, duration) {
+    stopCameraAnimation();
+
+    const end = {
+      x: target.x,
+      y: target.y,
+      zoom: clamp(target.zoom, MIN_ZOOM, MAX_ZOOM)
+    };
+
+    if (reducedMotion()) {
+      setCamera(end.x, end.y, end.zoom);
+      return;
+    }
+
+    cameraStart = { ...camera };
+    cameraEnd = end;
+    cameraStartTime = performance.now();
+    cameraDuration = duration ?? cameraConfig.travelDuration;
+    cameraAnimating = true;
+  }
+
+  function stepCamera(now) {
+    if (!cameraAnimating) return;
+
+    const t = clamp(
+      (now - cameraStartTime) / cameraDuration,
+      0, 1
+    );
+
+    const e = t * t * (3 - 2 * t);
+
+    // Log-space interpolation avoids abrupt changes
+    // when travelling between different zoom scales.
+    const zoom = Math.exp(
+      lerp(
+        Math.log(cameraStart.zoom),
+        Math.log(cameraEnd.zoom),
+        e
+      )
+    );
+
+    setCamera(
+      lerp(cameraStart.x, cameraEnd.x, e),
+      lerp(cameraStart.y, cameraEnd.y, e),
+      zoom
+    );
+
+    if (t >= 1) {
+      cameraAnimating = false;
+      cameraStart = null;
+      cameraEnd = null;
+    }
+  }
+
+  function zoomAt(screenX, screenY, factor) {
+    stopCameraAnimation();
+
+    const anchor = screenToWorld(screenX, screenY);
+    const zoom = clamp(
+      camera.zoom * factor,
+      MIN_ZOOM,
+      MAX_ZOOM
+    );
+
+    const x = anchor.x -
+      (screenX - width / 2) / zoom;
+
+    const y = anchor.y -
+      (screenY - height / 2) / zoom;
+
+    setCamera(x, y, zoom);
+  }
+
+  function fitNavigation() {
+    const nav = nodes.filter(n => n.type === "navigation");
+    if (!nav.length) return { x: 0, y: 0, zoom: .8 };
+
+    const xs = nav.map(n => n.x);
+    const ys = nav.map(n => n.y);
+
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const scale = Math.min(
+      width * (width < 650 ? .79 : .70) / (maxX - minX + 110),
+      height * .51 / (maxY - minY + 130),
+      1.08
+    );
+
+    return {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      zoom: clamp(scale, MIN_ZOOM, MAX_ZOOM)
+    };
+  }
+
+  function goHome() {
+    selectedId = null;
+    lastFocus = null;
+    moveCamera(fitNavigation(), 850);
+  }
+
+  function focusNode(node, requestedZoom = null) {
+    selectedId = node.id;
+    lastFocus = node;
+
+    const defaults = {
+      navigation: 1.4,
+      group: 2.1,
+      production: 4.4,
+      season: 9.2,
+      episode: 12
+    };
+
+    let zoom = requestedZoom ?? defaults[node.type] ?? 2;
+
+    // Keep navigation toward a parent gradual.
+    // A repeated tap can bring the camera closer.
+    if (Math.abs(camera.x - node.x) < 15 &&
+        Math.abs(camera.y - node.y) < 15 &&
+        camera.zoom >= zoom * .9) {
+      zoom = Math.min(MAX_ZOOM, camera.zoom * 1.35);
+    }
+
+    moveCamera({
+      x: node.x,
+      y: node.y,
+      zoom
+    }, cameraConfig.travelDuration);
+  }
+
+  /* =====================================================
+     3. THE UNIVERSE GRAPH
+  ===================================================== */
+
+  function createNode(source) {
+    return {
+      id: String(source.id),
+      title: String(source.title || source.name || "Untitled"),
+      type: source.type,
+      x: source.x,
+      y: source.y,
+      parentId: source.parentId || null,
+      depth: source.depth ?? 0,
+      demo: source.demo === true,
+      action: source.action || null,
+      magnitude: source.magnitude ?? 2.5,
+      data: source.data || null,
+
+      element: null,
+      visible: 0,
+      screenX: -10000,
+      screenY: -10000
+    };
+  }
+
+  function addNode(node) {
+    if (nodeMap.has(node.id)) return false;
+    nodeMap.set(node.id, node);
+    nodes.push(node);
     return true;
   }
 
-  function childrenOf(parent, source) {
+  function childCollection(parent) {
     if (parent.demo) {
-      return (parent.children || []).map(item => ({
-        ...item,
-        demo: true
-      }));
+      return Array.isArray(parent.children)
+        ? parent.children
+        : [];
     }
 
-    const collection = {
+    const collections = {
       group: state.archive.productions,
       production: state.archive.seasons,
       season: state.archive.episodes
-    }[parent.type];
+    };
 
-    if (!collection) return [];
-
-    const possibleKeys = {
+    const keys = {
       group: ["groupId", "parentId"],
       production: ["productionId", "parentId"],
       season: ["seasonId", "parentId"]
-    }[parent.type];
+    };
+
+    const collection = collections[parent.type];
+    if (!collection) return [];
 
     return collection.filter(item =>
-      possibleKeys.some(key =>
+      keys[parent.type].some(key =>
         item[key] != null &&
         String(item[key]) === String(parent.id)
       )
     );
   }
 
-  function addHierarchy(parentData, parentNode, type) {
-    if (parentNode.depth >= 4) return;
+  function childOffset(item, i, count, type) {
+    const radiusByType = {
+      production: 210,
+      season: 93,
+      episode: 36
+    };
 
-    const children = childrenOf(parentData, type);
+    const base = radiusByType[type] || 120;
+    const seed = hashString(item.id || item.title || i);
 
+    const angle =
+      -Math.PI / 2 +
+      i * Math.PI * 2 / Math.max(count, 1) +
+      (seeded(seed) - .5) * .29;
+
+    const r =
+      base *
+      (.86 + seeded(seed + 7) * .30) *
+      (count > 8 ? 1 + (count - 8) * .035 : 1);
+
+    if (count === 1) {
+      return { x: base * .75, y: -base * .35 };
+    }
+
+    return {
+      x: Math.cos(angle) * r,
+      y: Math.sin(angle) * r
+    };
+  }
+
+  function addChildren(parentData, parentNode) {
     const nextType = {
       group: "production",
       production: "season",
@@ -436,244 +517,208 @@
 
     if (!nextType) return;
 
-    children.forEach((child, index) => {
+    const children = childCollection(parentData);
+
+    children.forEach((child, i) => {
       const offset = childOffset(
-        child,
-        index,
-        children.length,
-        nextType
+        child, i, children.length, nextType
       );
 
-      const positionX =
-        child.mapX != null && Number.isFinite(Number(child.mapX))
-          ? Number(child.mapX)
-          : parentNode.x + offset.x;
+      const ownX = child.mapX != null
+        ? Number(child.mapX)
+        : NaN;
 
-      const positionY =
-        child.mapY != null && Number.isFinite(Number(child.mapY))
-          ? Number(child.mapY)
-          : parentNode.y + offset.y;
+      const ownY = child.mapY != null
+        ? Number(child.mapY)
+        : NaN;
 
-      const childNode = makeNode({
+      const node = createNode({
         id: child.id,
         title: child.title || child.name,
         type: nextType,
-        x: positionX,
-        y: positionY,
+        x: Number.isFinite(ownX)
+          ? ownX
+          : parentNode.x + offset.x,
+        y: Number.isFinite(ownY)
+          ? ownY
+          : parentNode.y + offset.y,
         parentId: parentNode.id,
         depth: parentNode.depth + 1,
-        demo: parentNode.demo || child.demo === true,
+        demo: parentNode.demo,
+        magnitude: 2.3 + seeded(
+          hashString(child.id || String(i))
+        ) * 2.1,
         data: child
       });
 
-      if (appendNode(childNode)) {
-        addHierarchy(child, childNode, nextType);
-      }
+      if (addNode(node)) addChildren(child, node);
     });
   }
 
-  function buildUniverse() {
-    allNodes = [];
-    allLines = [];
-    nodeLookup = new Map();
+  function groupPosition(group, index) {
+    const x = Number(group.mapX ?? group.x);
+    const y = Number(group.mapY ?? group.y);
 
-    // Cassiopeia-inspired navigation.
+    if (
+      (group.mapX != null || group.x != null) &&
+      (group.mapY != null || group.y != null) &&
+      Number.isFinite(x) &&
+      Number.isFinite(y)
+    ) {
+      return { x, y };
+    }
 
-    const navigationScale = mobileNavigationScale();
+    const seed = hashString(group.id || String(index));
+    const angle =
+      DATA.groupPlacement.angleOffset +
+      index * 2.3999632297 +
+      (seeded(seed) - .5) * .2;
 
-    DATA.navigation.nodes.forEach(item => {
-      appendNode(makeNode({
-        id: `nav-${item.id}`,
-        title: item.title,
-        type: "navigation",
-        x: item.x * navigationScale,
-        y: item.y * navigationScale,
-        depth: 0,
-        action: item.action,
-        size: item.size
-      }));
-    });
+    const radius =
+      DATA.groupPlacement.initialRadius +
+      Math.sqrt(index) * DATA.groupPlacement.distanceGrowth;
 
-    DATA.navigation.connections.forEach(([a, b]) => {
-      allLines.push({
-        a: `nav-${a}`,
-        b: `nav-${b}`,
-        type: "navigation",
-        depth: 0,
-        parentId: null,
-        element: null
-      });
-    });
-
-    // Every group becomes its own world-space star.
-
-    const groups = [
-      ...DATA.demoGroups,
-      ...state.archive.groups
-    ];
-
-    groups.forEach((item, index) => {
-      const position = positionForGroup(item, index);
-
-      const node = makeNode({
-        id: item.id,
-        title: item.title || item.name,
-        type: "group",
-        x: position.x,
-        y: position.y,
-        depth: 0,
-        demo: item.demo === true,
-        data: item
-      });
-
-      if (appendNode(node)) {
-        addHierarchy(item, node, "production");
-      }
-    });
-
-    // Connect siblings into individual constellations.
-
-    const parentIds = new Set(
-      allNodes
-        .filter(node => node.parentId)
-        .map(node => node.parentId)
-    );
-
-    parentIds.forEach(parentId => {
-      const siblings = allNodes.filter(
-        node => node.parentId === parentId
-      );
-
-      const edges = createNaturalConnections(siblings);
-
-      edges.forEach(([a, b]) => {
-        allLines.push({
-          a: a.id,
-          b: b.id,
-          type: "secondary",
-          depth: a.depth,
-          parentId,
-          element: null
-        });
-      });
-    });
+    return {
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius
+    };
   }
 
-  /* =====================================================
-     5. NATURAL CONSTELLATION CONNECTIONS
+  function naturalConnections(siblings) {
+    if (siblings.length < 2) return [];
 
-     A minimum-spanning tree gives organic paths
-     without forcing shapes into regular polygons.
-  ===================================================== */
-
-  function createNaturalConnections(nodes) {
-    if (nodes.length < 2) return [];
-
-    const connected = [nodes[0]];
-    const remaining = nodes.slice(1);
-    const edges = [];
+    const attached = [siblings[0]];
+    const remaining = siblings.slice(1);
+    const results = [];
 
     while (remaining.length) {
       let best = null;
 
-      connected.forEach(a => {
-        remaining.forEach(b => {
+      for (const a of attached) {
+        for (const b of remaining) {
           const distance = Math.hypot(
-            b.x - a.x,
-            b.y - a.y
+            a.x - b.x, a.y - b.y
           );
 
           if (!best || distance < best.distance) {
             best = { a, b, distance };
           }
-        });
-      });
+        }
+      }
 
       if (!best) break;
 
-      edges.push([best.a, best.b]);
+      results.push({
+        a: best.a.id,
+        b: best.b.id,
+        type: "secondary"
+      });
 
-      connected.push(best.b);
-
-      remaining.splice(
-        remaining.indexOf(best.b), 1
-      );
+      attached.push(best.b);
+      remaining.splice(remaining.indexOf(best.b), 1);
     }
 
-    return edges;
+    return results;
+  }
+
+  function rebuildUniverse() {
+    nodes = [];
+    connections = [];
+    nodeMap = new Map();
+
+    const navigationScale = width < 650 ? .58 : 1;
+
+    DATA.navigation.nodes.forEach(item => {
+      addNode(createNode({
+        id: `nav-${item.id}`,
+        title: item.title,
+        type: "navigation",
+        x: item.x * navigationScale,
+        y: item.y * navigationScale,
+        action: item.action,
+        magnitude: item.magnitude,
+        depth: 0
+      }));
+    });
+
+    DATA.navigation.connections.forEach(([a, b]) => {
+      connections.push({
+        a: `nav-${a}`,
+        b: `nav-${b}`,
+        type: "navigation"
+      });
+    });
+
+    const groupRecords = [
+      ...DATA.demoGroups,
+      ...state.archive.groups
+    ];
+
+    groupRecords.forEach((group, index) => {
+      const position = groupPosition(group, index);
+
+      const node = createNode({
+        id: group.id,
+        title: group.title || group.name,
+        type: "group",
+        x: position.x,
+        y: position.y,
+        depth: 0,
+        magnitude: 2.1,
+        demo: group.demo === true,
+        data: group
+      });
+
+      if (addNode(node)) addChildren(group, node);
+    });
+
+    const parents = new Set(
+      nodes.filter(n => n.parentId).map(n => n.parentId)
+    );
+
+    parents.forEach(parentId => {
+      const siblings = nodes.filter(
+        n => n.parentId === parentId
+      );
+      connections.push(...naturalConnections(siblings));
+    });
+
+    rebuildHTMLStars();
+    canvasDirty = true;
   }
 
   /* =====================================================
-     6. CREATE ALL STARS
+     4. SCREEN-SPACE LABELS
 
-     Rendered once. Zoom changes their visibility,
-     not their existence or coordinates.
+     These HTML buttons are never scaled by CSS.
+     Their positions are recalculated from the camera.
   ===================================================== */
 
-  function renderUniverse() {
+  function rebuildHTMLStars() {
     starLayer.replaceChildren();
-    lineLayer.replaceChildren();
 
-    const svgNS = "http://www.w3.org/2000/svg";
+    for (const node of nodes) {
+      const button = document.createElement("button");
 
-    allLines.forEach(line => {
-      const a = nodeLookup.get(line.a);
-      const b = nodeLookup.get(line.b);
-
-      if (!a || !b) return;
-
-      const element = document.createElementNS(
-        svgNS,
-        "line"
-      );
-
-      element.setAttribute("x1", a.x);
-      element.setAttribute("y1", a.y);
-      element.setAttribute("x2", b.x);
-      element.setAttribute("y2", b.y);
-
-      element.classList.add("constellation-line");
-
-      if (line.type === "secondary") {
-        element.classList.add("secondary");
-      }
-
-      line.element = element;
-
-      lineLayer.appendChild(element);
-    });
-
-    allNodes.forEach(node => {
-      const element = document.createElement("button");
-
-      element.type = "button";
-
-      element.className =
-        "celestial-star " +
-        `${node.type}-star` +
+      button.type = "button";
+      button.className =
+        `celestial-star ${node.type}-star` +
         (node.demo ? " demo-star" : "");
 
-      element.style.left = `${node.x}px`;
-      element.style.top = `${node.y}px`;
-
-      element.setAttribute(
-        "aria-label",
-        `Explore ${node.title}`
+      button.setAttribute(
+        "aria-label", `Explore ${node.title}`
       );
 
-      const aura = document.createElement("span");
-      aura.className = "star-aura";
-
-      const core = document.createElement("span");
-      core.className = "star-core";
+      const touch = document.createElement("span");
+      touch.className = "star-touch-area";
 
       const label = document.createElement("span");
       label.className = "star-label";
       label.textContent = node.title;
 
-      element.append(aura, core, label);
+      button.append(touch, label);
 
-      element.addEventListener("click", event => {
+      button.addEventListener("click", event => {
         event.stopPropagation();
 
         if (performance.now() < suppressClickUntil) {
@@ -683,774 +728,1538 @@
         selectStar(node);
       });
 
-      element.addEventListener("pointerenter", () => {
-        illuminate(node.id);
+      button.addEventListener("pointerenter", () => {
+        selectedId = node.id;
+        canvasDirty = true;
       });
 
-      element.addEventListener("pointerleave", () => {
-        illuminate(null);
+      button.addEventListener("pointerleave", () => {
+        if (selectedId === node.id) {
+          selectedId = lastFocus?.id || null;
+          canvasDirty = true;
+        }
       });
 
-      element.addEventListener("focus", () => {
-        illuminate(node.id);
+      button.addEventListener("focus", () => {
+        selectedId = node.id;
+        canvasDirty = true;
       });
 
-      element.addEventListener("blur", () => {
-        illuminate(null);
-      });
-
-      node.element = element;
-
-      starLayer.appendChild(element);
-    });
-
-    updateVisibility();
+      node.element = button;
+      starLayer.appendChild(button);
+    }
   }
 
-  function illuminate(id) {
-    allNodes.forEach(node => {
-      node.element?.classList.toggle(
-        "selected",
-        node.id === id
+  function threshold(node) {
+    if (node.type === "production") {
+      return DATA.semanticZoom.productions;
+    }
+
+    if (node.type === "season") {
+      return DATA.semanticZoom.seasons;
+    }
+
+    if (node.type === "episode") {
+      return DATA.semanticZoom.episodes;
+    }
+
+    return null;
+  }
+
+  function visibility(node) {
+    const rule = threshold(node);
+    if (!rule) return 1;
+
+    let value = smoothstep(
+      rule.start, rule.full, camera.zoom
+    );
+
+    // Spatial gating keeps unrelated constellations
+    // from all appearing simultaneously.
+    const parent = nodeMap.get(node.parentId);
+
+    if (parent) {
+      const distance = Math.hypot(
+        camera.x - parent.x,
+        camera.y - parent.y
+      ) * camera.zoom;
+
+      const reach = node.type === "production"
+        ? Math.max(width, height) * 1.4
+        : Math.max(width, height) * 1.15;
+
+      value *= 1 - smoothstep(
+        reach * .8, reach * 1.5, distance
+      );
+    }
+
+    return clamp(value, 0, 1);
+  }
+
+  function updateStarPositions() {
+    const margin = 100;
+
+    for (const node of nodes) {
+      const p = worldToScreen(node.x, node.y);
+
+      node.screenX = p.x;
+      node.screenY = p.y;
+
+      const alpha = visibility(node);
+      node.visible = alpha;
+
+      const onScreen =
+        p.x > -margin &&
+        p.x < width + margin &&
+        p.y > -margin &&
+        p.y < height + margin;
+
+      const display = onScreen && alpha > .02;
+
+      node.element.classList.toggle(
+        "is-hidden", !display
+      );
+
+      if (!display) {
+        node.element.tabIndex = -1;
+        continue;
+      }
+
+      node.element.style.left = `${p.x}px`;
+      node.element.style.top = `${p.y}px`;
+      node.element.style.setProperty(
+        "--visibility",
+        alpha.toFixed(3)
+      );
+
+      node.element.disabled = alpha < .68;
+      node.element.tabIndex = alpha >= .68 ? 0 : -1;
+      node.element.classList.toggle(
+        "selected", selectedId === node.id
+      );
+    }
+  }
+
+  /* =====================================================
+     5. HIGH-DPI CANVAS HELPERS
+  ===================================================== */
+
+  function resizeCanvas(canvas, context, ratio) {
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
+
+  function resizeAllCanvases() {
+    width = innerWidth;
+    height = innerHeight;
+
+    dpr = Math.min(
+      devicePixelRatio || 1,
+      DATA.graphics.maxPixelRatio
+    );
+
+    resizeCanvas(
+      starCanvas,
+      constellationRenderer.ctx,
+      dpr
+    );
+
+    resizeCanvas(
+      backgroundCanvas,
+      backgroundRenderer.ctx,
+      dpr
+    );
+
+    resizeCanvas(
+      nebulaCanvas,
+      nebulaRenderer.ctx,
+      Math.min(dpr, 1)
+    );
+
+    backgroundRenderer.rebuild();
+    nebulaRenderer.resize();
+
+    canvasDirty = true;
+  }
+
+  /* =====================================================
+     6. REALISTIC CONSTELLATION RENDERER
+
+     All glow and line effects are drawn at the
+     displayed screen resolution, without scaling text.
+  ===================================================== */
+
+  class ConstellationRenderer {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext("2d");
+    }
+
+    drawLine(a, b, alpha, highlighted) {
+      const ctx = this.ctx;
+
+      ctx.beginPath();
+      ctx.moveTo(a.screenX, a.screenY);
+      ctx.lineTo(b.screenX, b.screenY);
+
+      ctx.lineWidth = highlighted ? 1.1 : .66;
+
+      ctx.strokeStyle = highlighted
+        ? `rgba(204,199,255,${alpha * .75})`
+        : `rgba(160,174,232,${alpha * .37})`;
+
+      ctx.stroke();
+
+      if (highlighted) {
+        ctx.save();
+        ctx.shadowBlur = 9;
+        ctx.shadowColor = "rgba(167,155,255,.55)";
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    drawStar(node, time) {
+      const ctx = this.ctx;
+
+      const { screenX: x, screenY: y } = node;
+      const alpha = node.visible;
+
+      if (alpha <= .01) return;
+
+      const styles = {
+        navigation: DATA.appearance.navigationStars,
+        group: DATA.appearance.groupStars,
+        production: DATA.appearance.productionStars,
+        season: DATA.appearance.seasonStars,
+        episode: DATA.appearance.episodeStars
+      };
+
+      const style = styles[node.type];
+      if (!style) return;
+
+      const [r, g, b] = style.color;
+
+      const magnitudeBoost =
+        clamp((4 - node.magnitude) * .12 + 1, .72, 1.35);
+
+      const radius = style.radius * magnitudeBoost;
+
+      const active = selectedId === node.id;
+      const glowMultiplier =
+        state.settings.constellationGlow / 65;
+
+      const pulse = reducedMotion()
+        ? 1
+        : 1 + Math.sin(
+            time * .0012 + hashString(node.id)
+          ) * .05;
+
+      const outerRadius =
+        style.glow * glowMultiplier *
+        (active ? 1.55 : 1) * pulse;
+
+      // Low-intensity stellar halo.
+      const halo = ctx.createRadialGradient(
+        x, y, 0,
+        x, y, outerRadius
+      );
+
+      halo.addColorStop(
+        0, `rgba(${r},${g},${b},${alpha * .27})`
+      );
+
+      halo.addColorStop(
+        .18, `rgba(${r},${g},${b},${alpha * .14})`
+      );
+
+      halo.addColorStop(
+        .52, `rgba(${r},${g},${b},${alpha * .035})`
+      );
+
+      halo.addColorStop(1, "rgba(0,0,0,0)");
+
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(x, y, outerRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bright stellar core.
+      const core = ctx.createRadialGradient(
+        x, y, 0,
+        x, y, radius * 2.2
+      );
+
+      core.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      core.addColorStop(
+        .22, `rgba(${r},${g},${b},${alpha * .95})`
+      );
+      core.addColorStop(
+        .55, `rgba(${r},${g},${b},${alpha * .36})`
+      );
+      core.addColorStop(1, "rgba(0,0,0,0)");
+
+      ctx.fillStyle = core;
+      ctx.beginPath();
+      ctx.arc(x, y, radius * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Subtle diffraction spikes on bright stars.
+      if (node.type === "navigation" ||
+          (node.type === "group" && active)) {
+        const length = radius * (active ? 6.8 : 5.0);
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.globalAlpha = alpha * .55;
+
+        const rayH = ctx.createLinearGradient(
+          -length, 0, length, 0
+        );
+        rayH.addColorStop(0, "transparent");
+        rayH.addColorStop(.5, "rgba(224,229,255,.75)");
+        rayH.addColorStop(1, "transparent");
+
+        ctx.strokeStyle = rayH;
+        ctx.lineWidth = .65;
+        ctx.beginPath();
+        ctx.moveTo(-length, 0);
+        ctx.lineTo(length, 0);
+        ctx.stroke();
+
+        const rayV = ctx.createLinearGradient(
+          0, -length, 0, length
+        );
+        rayV.addColorStop(0, "transparent");
+        rayV.addColorStop(.5, "rgba(224,229,255,.75)");
+        rayV.addColorStop(1, "transparent");
+
+        ctx.strokeStyle = rayV;
+        ctx.beginPath();
+        ctx.moveTo(0, -length);
+        ctx.lineTo(0, length);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+    }
+
+    draw(time) {
+      const ctx = this.ctx;
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw lines first so the stars cover endpoints.
+      for (const line of connections) {
+        const a = nodeMap.get(line.a);
+        const b = nodeMap.get(line.b);
+
+        if (!a || !b) continue;
+
+        const alpha = Math.min(a.visible, b.visible);
+        if (alpha < .015) continue;
+
+        const margin = 65;
+
+        if (
+          Math.max(a.screenX, b.screenX) < -margin ||
+          Math.min(a.screenX, b.screenX) > width + margin ||
+          Math.max(a.screenY, b.screenY) < -margin ||
+          Math.min(a.screenY, b.screenY) > height + margin
+        ) continue;
+
+        const highlighted =
+          selectedId === line.a ||
+          selectedId === line.b;
+
+        this.drawLine(a, b, alpha, highlighted);
+      }
+
+      for (const node of nodes) {
+        if (node.visible <= .015) continue;
+
+        if (
+          node.screenX < -90 ||
+          node.screenX > width + 90 ||
+          node.screenY < -90 ||
+          node.screenY > height + 90
+        ) continue;
+
+        this.drawStar(node, time);
+      }
+    }
+  }
+
+  /* =====================================================
+     7. DEEP-SPACE BACKGROUND STARS
+
+     Several different populations create the impression
+     of distant stars rather than uniform random dots.
+  ===================================================== */
+
+  class BackgroundRenderer {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext("2d");
+      this.stars = [];
+      this.seed = 48192;
+    }
+
+    rebuild() {
+      const count = Math.min(
+        DATA.graphics.maximumBackgroundStars,
+        Math.round(
+          DATA.graphics.backgroundStarCount *
+          (width * height / 850000) *
+          (state.settings.starDensity / 75)
+        )
+      );
+
+      this.stars = [];
+
+      for (let i = 0; i < Math.max(count, 90); i++) {
+        const seed = this.seed + i * 149;
+        const cls = seeded(seed + 1);
+
+        const radius =
+          cls < .83
+            ? .18 + seeded(seed + 2) * .50
+            : cls < .98
+              ? .66 + seeded(seed + 3) * .55
+              : 1.2 + seeded(seed + 4) * 1.3;
+
+        const temperature = seeded(seed + 5);
+
+        const color =
+          temperature < .13
+            ? [255, 218, 201]
+            : temperature < .52
+              ? [226, 230, 255]
+              : [182, 209, 255];
+
+        this.stars.push({
+          x: seeded(seed + 6) * width,
+          y: seeded(seed + 7) * height,
+          radius,
+          depth: .025 + seeded(seed + 8) * .22,
+          alpha: .12 + seeded(seed + 9) * .78,
+          phase: seeded(seed + 10) * Math.PI * 2,
+          speed: .0002 + seeded(seed + 11) * .0005,
+          color
+        });
+      }
+    }
+
+    draw(time) {
+      const ctx = this.ctx;
+      ctx.clearRect(0, 0, width, height);
+
+      const brightness = state.settings.starBrightness / 100;
+
+      for (const s of this.stars) {
+        const x = (
+          (s.x - camera.x * s.depth) % width + width
+        ) % width;
+
+        const y = (
+          (s.y - camera.y * s.depth) % height + height
+        ) % height;
+
+        const twinkle = reducedMotion()
+          ? 1
+          : .88 + Math.sin(
+              time * s.speed + s.phase
+            ) * .12;
+
+        const alpha = clamp(
+          s.alpha * twinkle * (.45 + brightness),
+          0, 1
+        );
+
+        const [r, g, b] = s.color;
+
+        ctx.fillStyle =
+          `rgba(${r},${g},${b},${alpha})`;
+
+        ctx.beginPath();
+        ctx.arc(x, y, s.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (s.radius > 1.6) {
+          const glow = ctx.createRadialGradient(
+            x, y, 0, x, y, s.radius * 6
+          );
+
+          glow.addColorStop(
+            0, `rgba(${r},${g},${b},${alpha * .15})`
+          );
+          glow.addColorStop(1, "rgba(0,0,0,0)");
+
+          ctx.fillStyle = glow;
+          ctx.beginPath();
+          ctx.arc(x, y, s.radius * 6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  /* =====================================================
+     8. PROCEDURAL NEBULA
+
+     A low-resolution cached texture is constructed
+     from layered cloud shapes and fine star-dust.
+
+     The texture is generated only during resize or
+     quality changes, not every animation frame.
+  ===================================================== */
+
+  class NebulaRenderer {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext("2d");
+      this.texture = document.createElement("canvas");
+      this.textureCtx = this.texture.getContext("2d");
+      this.resize();
+    }
+
+    resize() {
+      const scale = DATA.graphics.nebulaResolution;
+
+      this.texture.width = Math.max(
+        320, Math.round(width * scale)
+      );
+      this.texture.height = Math.max(
+        260, Math.round(height * scale)
+      );
+
+      this.generate();
+    }
+
+    generate() {
+      const ctx = this.textureCtx;
+      const w = this.texture.width;
+      const h = this.texture.height;
+
+      ctx.clearRect(0, 0, w, h);
+
+      const clouds = [
+        { x: .14, y: .20, r: .55, c: [23, 64, 135], a: .24 },
+        { x: .31, y: .42, r: .49, c: [35, 81, 172], a: .26 },
+        { x: .48, y: .47, r: .44, c: [60, 100, 194], a: .18 },
+        { x: .62, y: .36, r: .50, c: [23, 51, 112], a: .23 },
+        { x: .83, y: .65, r: .53, c: [49, 36, 117], a: .16 },
+        { x: .17, y: .77, r: .43, c: [14, 35, 89], a: .15 },
+        { x: .74, y: .20, r: .40, c: [34, 65, 129], a: .16 },
+        { x: .48, y: .81, r: .42, c: [15, 36, 89], a: .14 }
+      ];
+
+      // Soft underlying clouds.
+      for (const cloud of clouds) {
+        const x = cloud.x * w;
+        const y = cloud.y * h;
+        const radius = cloud.r * Math.max(w, h);
+
+        const [r, g, b] = cloud.c;
+        const gradient = ctx.createRadialGradient(
+          x, y, 0, x, y, radius
+        );
+
+        gradient.addColorStop(
+          0, `rgba(${r},${g},${b},${cloud.a})`
+        );
+        gradient.addColorStop(
+          .38, `rgba(${r},${g},${b},${cloud.a * .53})`
+        );
+        gradient.addColorStop(1, "rgba(0,0,0,0)");
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, w, h);
+      }
+
+      // A diagonal band of wispy clustered gas.
+      // Use seeded positions for a stable background.
+      const count = 240;
+
+      for (let i = 0; i < count; i++) {
+        const s = i * 37 + 109;
+
+        const t = seeded(s);
+        const spread = (seeded(s + 1) - .5);
+
+        const x = (t * 1.35 - .17) * w;
+
+        const y = (
+          .62 - .36 * t +
+          spread * .37
+        ) * h;
+
+        const radius =
+          (9 + seeded(s + 2) * 58) *
+          Math.min(w / 600, 1.4);
+
+        const blue = seeded(s + 3) > .38;
+
+        const color = blue
+          ? [66, 103, 191]
+          : [48, 42, 111];
+
+        const alpha = .016 + seeded(s + 4) * .043;
+
+        const gradient = ctx.createRadialGradient(
+          x, y, 0, x, y, radius
+        );
+
+        gradient.addColorStop(
+          0,
+          `rgba(${color[0]},${color[1]},${color[2]},${alpha})`
+        );
+        gradient.addColorStop(1, "rgba(0,0,0,0)");
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Fine mist texture and small dust points.
+      const dots = Math.min(
+        5000,
+        Math.round(w * h / 110)
+      );
+
+      for (let i = 0; i < dots; i++) {
+        const s = i * 19 + 5501;
+
+        const x = seeded(s) * w;
+        const y = seeded(s + 1) * h;
+
+        const bandY = .62 - .36 * (x / w);
+        const distance = Math.abs(y / h - bandY);
+
+        const weight = Math.max(
+          0, 1 - distance / .38
+        );
+
+        if (seeded(s + 2) > weight) continue;
+
+        ctx.fillStyle =
+          `rgba(142,173,239,${.015 + weight * .12})`;
+
+        ctx.fillRect(
+          x, y,
+          .35 + seeded(s + 3) * .8,
+          .35 + seeded(s + 4) * .8
+        );
+      }
+
+      // Vignette inside texture.
+      const vignette = ctx.createRadialGradient(
+        w * .5, h * .48, w * .08,
+        w * .5, h * .48, w * .76
+      );
+
+      vignette.addColorStop(0, "rgba(0,0,0,0)");
+      vignette.addColorStop(1, "rgba(0,0,0,.27)");
+
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    draw() {
+      const ctx = this.ctx;
+      ctx.clearRect(0, 0, width, height);
+
+      const opacity =
+        state.settings.nebulaIntensity / 100;
+
+      ctx.save();
+      ctx.globalAlpha = opacity;
+
+      // Very slow spatial parallax.
+      const shiftX = camera.x * .008;
+      const shiftY = camera.y * .008;
+
+      const overscan = 100;
+
+      ctx.drawImage(
+        this.texture,
+        -overscan - shiftX,
+        -overscan - shiftY,
+        width + overscan * 2,
+        height + overscan * 2
+      );
+
+      ctx.restore();
+    }
+  }
+
+  const constellationRenderer =
+    new ConstellationRenderer(starCanvas);
+
+  const backgroundRenderer =
+    new BackgroundRenderer(backgroundCanvas);
+
+  const nebulaRenderer =
+    new NebulaRenderer(nebulaCanvas);
+
+  /* =====================================================
+     9. RENDER LOOP
+
+     Camera, backgrounds, stars, and labels are updated
+     together. Expensive texture generation stays outside
+     the animation loop.
+  ===================================================== */
+
+  function renderFrame(time) {
+    if (!running) return;
+
+    const targetInterval =
+      1000 / DATA.graphics.targetFrameRate;
+
+    if (time - lastFrameTime >= targetInterval - 1) {
+      stepCamera(time);
+
+      const moving = cameraAnimating;
+
+      if (!reducedMotion() || canvasDirty || moving) {
+        updateStarPositions();
+
+        nebulaRenderer.draw();
+        backgroundRenderer.draw(time);
+        constellationRenderer.draw(time);
+
+        canvasDirty = false;
+      }
+
+      lastFrameTime = time;
+    }
+
+    animationFrame = requestAnimationFrame(renderFrame);
+  }
+
+  function startRenderLoop() {
+    if (running) return;
+    running = true;
+    animationFrame = requestAnimationFrame(renderFrame);
+  }
+
+  function stopRenderLoop() {
+    running = false;
+
+    if (animationFrame != null) {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+    }
+  }
+
+  /* =====================================================
+     10. USER INTERACTIONS
+  ===================================================== */
+
+  function pointerPoint(e) {
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function pointerDistance(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  function pointerCenter(a, b) {
+    return {
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2
+    };
+  }
+
+  function beginPinch() {
+    if (pointers.size < 2) return;
+
+    const [a, b] = [...pointers.values()];
+    const center = pointerCenter(a, b);
+
+    gesture = {
+      type: "pinch",
+      originalDistance: Math.max(
+        1, pointerDistance(a, b)
+      ),
+      originalZoom: camera.zoom,
+      anchor: screenToWorld(center.x, center.y),
+      moved: true
+    };
+
+    suppressClickUntil = performance.now() + 500;
+  }
+
+  function bindGestures() {
+    viewport.addEventListener("pointerdown", e => {
+      if (e.pointerType === "mouse" && e.button !== 0) {
+        return;
+      }
+
+      stopCameraAnimation();
+
+      pointers.set(e.pointerId, pointerPoint(e));
+
+      if (pointers.size === 1) {
+        gesture = {
+          type: "drag",
+          total: 0,
+          moved: false
+        };
+      }
+
+      if (pointers.size >= 2) {
+        beginPinch();
+      }
+    });
+
+    viewport.addEventListener("pointermove", e => {
+      if (!pointers.has(e.pointerId)) return;
+
+      const previous = pointers.get(e.pointerId);
+      const current = pointerPoint(e);
+
+      pointers.set(e.pointerId, current);
+
+      if (pointers.size >= 2) {
+        const [a, b] = [...pointers.values()];
+
+        if (!gesture || gesture.type !== "pinch") {
+          beginPinch();
+        }
+
+        const center = pointerCenter(a, b);
+        const dist = Math.max(1, pointerDistance(a, b));
+
+        const zoom = clamp(
+          gesture.originalZoom *
+          dist / gesture.originalDistance,
+          MIN_ZOOM,
+          MAX_ZOOM
+        );
+
+        setCamera(
+          gesture.anchor.x -
+            (center.x - width / 2) / zoom,
+          gesture.anchor.y -
+            (center.y - height / 2) / zoom,
+          zoom
+        );
+
+        gesture.moved = true;
+        suppressClickUntil = performance.now() + 450;
+
+        return;
+      }
+
+      if (!gesture || gesture.type !== "drag") {
+        gesture = {
+          type: "drag",
+          total: 0,
+          moved: false
+        };
+      }
+
+      const dx = current.x - previous.x;
+      const dy = current.y - previous.y;
+
+      gesture.total += Math.hypot(dx, dy);
+
+      if (gesture.total > cameraConfig.tapThreshold) {
+        gesture.moved = true;
+        viewport.classList.add("dragging");
+
+        suppressClickUntil = performance.now() + 350;
+
+        if (!viewport.hasPointerCapture(e.pointerId)) {
+          viewport.setPointerCapture(e.pointerId);
+        }
+      }
+
+      setCamera(
+        camera.x - dx / camera.zoom,
+        camera.y - dy / camera.zoom,
+        camera.zoom
       );
     });
 
-    allLines.forEach(line => {
-      line.element?.classList.toggle(
-        "highlighted",
-        id === line.a || id === line.b
+    function endPointer(e) {
+      if (!pointers.has(e.pointerId)) return;
+
+      pointers.delete(e.pointerId);
+
+      if (viewport.hasPointerCapture(e.pointerId)) {
+        viewport.releasePointerCapture(e.pointerId);
+      }
+
+      if (gesture?.moved) {
+        suppressClickUntil = performance.now() + 350;
+      }
+
+      if (pointers.size === 0) {
+        gesture = null;
+        viewport.classList.remove("dragging");
+      } else if (pointers.size === 1) {
+        gesture = {
+          type: "drag",
+          total: 0,
+          moved: true
+        };
+      }
+    }
+
+    viewport.addEventListener("pointerup", endPointer);
+    viewport.addEventListener("pointercancel", endPointer);
+
+    viewport.addEventListener("wheel", e => {
+      e.preventDefault();
+
+      const factor = Math.exp(
+        -e.deltaY * cameraConfig.wheelSensitivity
       );
+
+      zoomAt(e.clientX, e.clientY, factor);
+    }, { passive: false });
+
+    viewport.addEventListener("click", e => {
+      if (performance.now() < suppressClickUntil) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }, true);
+
+    viewport.addEventListener("keydown", e => {
+      if (e.target !== viewport) return;
+
+      const step = 85 / camera.zoom;
+
+      switch (e.key) {
+        case "ArrowLeft":
+          setCamera(camera.x - step, camera.y, camera.zoom);
+          break;
+        case "ArrowRight":
+          setCamera(camera.x + step, camera.y, camera.zoom);
+          break;
+        case "ArrowUp":
+          setCamera(camera.x, camera.y - step, camera.zoom);
+          break;
+        case "ArrowDown":
+          setCamera(camera.x, camera.y + step, camera.zoom);
+          break;
+        case "+":
+        case "=":
+          zoomAt(width / 2, height / 2, 1.25);
+          break;
+        case "-":
+          zoomAt(width / 2, height / 2, .8);
+          break;
+        default:
+          return;
+      }
+
+      e.preventDefault();
     });
   }
 
   /* =====================================================
-     7. CAMERA
+     11. MEDIA COLLECTIONS
+
+     Library / History / Rankings / Watchlist
+     operate exclusively on saved productions.
   ===================================================== */
 
-  function screenToWorld(screenX, screenY) {
-    return {
-      x: camera.x +
-        (screenX - innerWidth / 2) / camera.zoom,
-
-      y: camera.y +
-        (screenY - innerHeight / 2) / camera.zoom
-    };
-  }
-
-  function worldToScreen(x, y) {
-    return {
-      x: innerWidth / 2 +
-        (x - camera.x) * camera.zoom,
-
-      y: innerHeight / 2 +
-        (y - camera.y) * camera.zoom
-    };
-  }
-
-  function renderCamera() {
-    world.style.transform =
-      `translate3d(${innerWidth / 2}px,` +
-      `${innerHeight / 2}px,0) ` +
-      `scale(${camera.zoom}) ` +
-      `translate3d(${-camera.x}px,` +
-      `${-camera.y}px,0)`;
-
-    updateVisibility();
-    updateZoomIndicator();
-
-    if (background) {
-      background.setCamera(camera.x, camera.y);
-    }
-  }
-
-  function setCamera(x, y, zoom) {
-    camera.x = x;
-    camera.y = y;
-    camera.zoom = clamp(
-      zoom, MIN_ZOOM, MAX_ZOOM
+  function productions() {
+    return state.archive.productions.filter(
+      p => p && typeof p === "object"
     );
-
-    renderCamera();
   }
 
-  function zoomAt(screenX, screenY, factor) {
-    cancelCameraAnimation();
-
-    const anchor = screenToWorld(screenX, screenY);
-
-    const newZoom = clamp(
-      camera.zoom * factor,
-      MIN_ZOOM,
-      MAX_ZOOM
-    );
-
-    camera.zoom = newZoom;
-
-    camera.x = anchor.x -
-      (screenX - innerWidth / 2) / newZoom;
-
-    camera.y = anchor.y -
-      (screenY - innerHeight / 2) / newZoom;
-
-    renderCamera();
+  function titleOf(item) {
+    return String(item.title || item.name || "Untitled");
   }
 
-  function updateZoomIndicator() {
-    const marker = $("#zoomMarker");
+  function getRating(item) {
+    const raw =
+      item.averageRating ??
+      item.calculatedRating ??
+      item.rating;
 
-    if (!marker) return;
-
-    const amount =
-      (Math.log(camera.zoom) - Math.log(MIN_ZOOM)) /
-      (Math.log(MAX_ZOOM) - Math.log(MIN_ZOOM));
-
-    marker.style.left =
-      `${clamp(amount, 0, 1) * 100}%`;
-  }
-
-  /* =====================================================
-     8. CONTINUOUS CAMERA ANIMATION
-
-     The world never gets replaced.
-     Only camera position and zoom change.
-  ===================================================== */
-
-  function cancelCameraAnimation() {
-    cameraAnimationToken++;
-
-    if (cameraFrame != null) {
-      cancelAnimationFrame(cameraFrame);
-      cameraFrame = null;
+    if (raw === null || raw === undefined || raw === "") {
+      return null;
     }
+
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
   }
 
-  function animateCamera(target, duration) {
-    cancelCameraAnimation();
+  function getLastWatched(item) {
+    const raw =
+      item.lastWatched ??
+      item.lastSeen ??
+      item.watchedAt;
 
-    const token = cameraAnimationToken;
+    if (!raw) return 0;
 
-    const start = { ...camera };
+    const time = new Date(raw).getTime();
+    return Number.isFinite(time) ? time : 0;
+  }
 
-    const end = {
-      x: target.x,
-      y: target.y,
-      zoom: clamp(
-        target.zoom, MIN_ZOOM, MAX_ZOOM
-      )
-    };
+  function getReleaseYear(item) {
+    const raw =
+      item.startYear ??
+      item.releaseYear ??
+      item.year;
 
-    if (motionReduced()) {
-      setCamera(end.x, end.y, end.zoom);
+    const n = Number(raw);
+    return raw == null || !Number.isFinite(n)
+      ? null
+      : n;
+  }
+
+  function addedTime(item) {
+    const raw = item.createdAt || item.addedAt;
+    if (!raw) return 0;
+
+    const n = new Date(raw).getTime();
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function genreList(item) {
+    const genres = item.genres || item.mainGenres || [];
+    return Array.isArray(genres)
+      ? genres
+      : typeof genres === "string"
+        ? genres.split(",").map(s => s.trim())
+        : [];
+  }
+
+  function isWatchlisted(item) {
+    return item.watchlist === true ||
+      item.status === "Planned" ||
+      item.status === "Watchlist";
+  }
+
+  function viewItems(type) {
+    let list = [...productions()];
+
+    if (type === "history") {
+      list = list.filter(p => getLastWatched(p) > 0);
+    } else if (type === "rankings") {
+      list = list.filter(p => getRating(p) !== null);
+    } else if (type === "watchlist") {
+      list = list.filter(isWatchlisted);
+    }
+
+    return list;
+  }
+
+  function sortedItems(list, sort) {
+    const result = [...list];
+    const byTitle = (a, b) =>
+      titleOf(a).localeCompare(titleOf(b), undefined, {
+        sensitivity: "base"
+      });
+
+    result.sort((a, b) => {
+      switch (sort) {
+        case "alphabeticalReverse":
+          return -byTitle(a, b);
+        case "highestRated":
+          return (getRating(b) ?? -1) -
+            (getRating(a) ?? -1) || byTitle(a, b);
+        case "lowestRated":
+          return (getRating(a) ?? 999) -
+            (getRating(b) ?? 999) || byTitle(a, b);
+        case "lastWatched":
+          return getLastWatched(b) -
+            getLastWatched(a) || byTitle(a, b);
+        case "oldestAdded":
+          return addedTime(a) - addedTime(b) ||
+            byTitle(a, b);
+        case "newestAdded":
+          return addedTime(b) - addedTime(a) ||
+            byTitle(a, b);
+        case "earliestRelease":
+          return (getReleaseYear(a) ?? 99999) -
+            (getReleaseYear(b) ?? 99999) ||
+            byTitle(a, b);
+        case "latestRelease":
+          return (getReleaseYear(b) ?? -99999) -
+            (getReleaseYear(a) ?? -99999) ||
+            byTitle(a, b);
+        default:
+          return byTitle(a, b);
+      }
+    });
+
+    return result;
+  }
+
+  function filteredCollection(type) {
+    let items = viewItems(type);
+
+    const q = collectionOptions.query.trim().toLowerCase();
+
+    if (q) {
+      items = items.filter(item =>
+        titleOf(item).toLowerCase().includes(q)
+      );
+    }
+
+    if (collectionOptions.genre) {
+      items = items.filter(item =>
+        genreList(item).some(g =>
+          g.toLowerCase() ===
+          collectionOptions.genre.toLowerCase()
+        )
+      );
+    }
+
+    if (collectionOptions.mediaType) {
+      items = items.filter(item =>
+        (item.mediaType || item.type || "") ===
+        collectionOptions.mediaType
+      );
+    }
+
+    if (collectionOptions.status) {
+      items = items.filter(item =>
+        item.status === collectionOptions.status
+      );
+    }
+
+    return sortedItems(items, collectionOptions.sort);
+  }
+
+  function collectionHeader(type) {
+    const config = DATA.libraryViews[type];
+
+    return `
+      <span class="detail-eyebrow">YOUR ARCHIVE</span>
+      <h2 id="detailTitle">${escapeHTML(config.title)}</h2>
+      <p>${escapeHTML(config.description)}</p>
+    `;
+  }
+
+  function collectionToolbar() {
+    const sortOptions = DATA.sorting.map(opt =>
+      `<option value="${escapeHTML(opt.id)}">
+        ${escapeHTML(opt.title)}
+      </option>`
+    ).join("");
+
+    const genreOptions = DATA.mainGenres.map(genre =>
+      `<option value="${escapeHTML(genre)}">
+        ${escapeHTML(genre)}
+      </option>`
+    ).join("");
+
+    const mediaOptions = DATA.mediaTypes.map(type =>
+      `<option value="${escapeHTML(type)}">
+        ${escapeHTML(type)}
+      </option>`
+    ).join("");
+
+    const statusOptions = DATA.statuses.map(status =>
+      `<option value="${escapeHTML(status)}">
+        ${escapeHTML(status)}
+      </option>`
+    ).join("");
+
+    return `
+      <div class="library-toolbar">
+
+        <div class="library-control">
+          <label for="collectionSearch">Search</label>
+          <input
+            id="collectionSearch"
+            class="library-input"
+            type="search"
+            placeholder="Find a title..."
+          >
+        </div>
+
+        <div class="library-control">
+          <label for="collectionSort">Sort by</label>
+          <select id="collectionSort" class="library-select">
+            ${sortOptions}
+          </select>
+        </div>
+
+        <div class="library-control">
+          <label for="collectionGenre">Main genre</label>
+          <select id="collectionGenre" class="library-select">
+            <option value="">All genres</option>
+            ${genreOptions}
+          </select>
+        </div>
+
+        <div class="library-control">
+          <label for="collectionMedia">Media type</label>
+          <select id="collectionMedia" class="library-select">
+            <option value="">All media</option>
+            ${mediaOptions}
+          </select>
+        </div>
+
+        <div class="library-control">
+          <label for="collectionStatus">Status</label>
+          <select id="collectionStatus" class="library-select">
+            <option value="">All statuses</option>
+            ${statusOptions}
+          </select>
+        </div>
+
+      </div>
+
+      <div id="collectionCount" class="library-count"></div>
+      <div id="collectionResults" class="library-results"></div>
+    `;
+  }
+
+  function renderCollectionResults() {
+    if (!currentCollection) return;
+
+    const items = filteredCollection(currentCollection);
+    const count = $("#collectionCount");
+    const results = $("#collectionResults");
+
+    if (!results) return;
+
+    count.textContent =
+      `${items.length} ${items.length === 1 ? "production" : "productions"}`;
+
+    if (!items.length) {
+      results.innerHTML = `
+        <div class="library-empty">
+          <span class="library-empty-symbol">✧</span>
+          <h3>Nothing among the stars yet.</h3>
+          <p>
+            ${state.archive.productions.length
+              ? "No productions match these filters."
+              : "Your personal productions will appear here once you begin adding them in Step 3."}
+          </p>
+        </div>
+      `;
       return;
     }
 
-    const beginning = performance.now();
+    results.innerHTML = items.map(item => {
+      const rating = getRating(item);
+      const year = getReleaseYear(item);
 
-    const timeLength =
-      duration ?? DATA.camera.transitionDuration;
+      return `
+        <button
+          type="button"
+          class="library-entry"
+          data-id="${escapeHTML(item.id)}"
+        >
+          <span class="library-entry-main">
+            <span class="library-entry-title">
+              ${escapeHTML(titleOf(item))}
+            </span>
+            <span class="library-entry-meta">
+              ${escapeHTML(item.mediaType || "Production")}
+              ${year == null ? "" : " · " + year}
+              ${item.status
+                ? " · " + escapeHTML(item.status)
+                : ""}
+            </span>
+          </span>
 
-    function frame(time) {
-      if (token !== cameraAnimationToken) return;
+          <span class="library-entry-rating">
+            ${rating == null ? "—" : rating.toFixed(1) + " / 10"}
+          </span>
+        </button>
+      `;
+    }).join("");
 
-      const progress = clamp(
-        (time - beginning) / timeLength,
-        0, 1
-      );
+    results.querySelectorAll(".library-entry")
+      .forEach(button => {
+        button.addEventListener("click", () => {
+          const node = nodes.find(n =>
+            n.type === "production" &&
+            n.id === button.dataset.id
+          );
 
-      const eased =
-        progress * progress * (3 - 2 * progress);
+          closeOverlay();
 
-      // Logarithmic zoom feels more natural
-      // when traveling between large scale differences.
-
-      const zoom =
-        Math.exp(
-          lerp(
-            Math.log(start.zoom),
-            Math.log(end.zoom),
-            eased
-          )
-        );
-
-      setCamera(
-        lerp(start.x, end.x, eased),
-        lerp(start.y, end.y, eased),
-        zoom
-      );
-
-      if (progress < 1) {
-        cameraFrame = requestAnimationFrame(frame);
-      } else {
-        cameraFrame = null;
-      }
-    }
-
-    cameraFrame = requestAnimationFrame(frame);
+          if (node) focusNode(node);
+          else showToast("This production has no constellation position yet.");
+        });
+      });
   }
 
-  function focusNode(node, desiredZoom) {
-    lastFocusedNode = node;
+  function openCollection(type) {
+    if (!DATA.libraryViews[type]) return;
 
-    const zoomTargets = {
-      navigation: 1.7,
-      group: 2.1,
-      production: 4.1,
-      season: 7.1,
-      episode: 9.6
+    currentCollection = type;
+    collectionOptions = {
+      query: "",
+      sort: DATA.libraryViews[type].defaultSort,
+      genre: "",
+      mediaType: "",
+      status: ""
     };
 
-    const zoom = desiredZoom ??
-      zoomTargets[node.type] ??
-      camera.zoom;
-
-    animateCamera({
-      x: node.x,
-      y: node.y,
-      zoom
-    });
-  }
-
-  function focusMainConstellation() {
-    lastFocusedNode = null;
-
-    const navigation = allNodes.filter(
-      node => node.type === "navigation"
+    openDetail(
+      collectionHeader(type) + collectionToolbar()
     );
 
-    if (!navigation.length) return;
+    $("#collectionSort").value = collectionOptions.sort;
 
-    const xs = navigation.map(node => node.x);
-    const ys = navigation.map(node => node.y);
+    const map = [
+      ["collectionSearch", "query"],
+      ["collectionSort", "sort"],
+      ["collectionGenre", "genre"],
+      ["collectionMedia", "mediaType"],
+      ["collectionStatus", "status"]
+    ];
 
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-
-    const width = maxX - minX;
-    const height = maxY - minY;
-
-    const availableWidth =
-      innerWidth * (innerWidth < 650 ? .78 : .73);
-
-    const availableHeight =
-      innerHeight * .55;
-
-    const zoom = clamp(
-      Math.min(
-        availableWidth / (width + 100),
-        availableHeight / (height + 90),
-        1.05
-      ),
-      MIN_ZOOM,
-      1.05
-    );
-
-    animateCamera({
-      x: (minX + maxX) / 2,
-      y: (minY + maxY) / 2,
-      zoom
-    }, 800);
-  }
-
-  /* =====================================================
-     9. SEMANTIC ZOOM
-
-     Child stars gradually materialize as you approach.
-
-     Visibility depends on camera zoom.
-
-     The visibility of a descendant also depends on
-     its ancestors' visibility.
-
-     No page cut or scene replacement occurs.
-  ===================================================== */
-
-  function thresholdForNode(node) {
-    const config = DATA.semanticZoom;
-
-    switch (node.type) {
-      case "production":
-        return config.groupContents;
-
-      case "season":
-        return config.productionContents;
-
-      case "episode":
-        return config.seasonContents;
-
-      default:
-        return null;
-    }
-  }
-
-  function visibilityForNode(node) {
-    if (
-      node.type === "navigation" ||
-      node.type === "group"
-    ) {
-      return 1;
+    for (const [id, key] of map) {
+      $("#" + id).addEventListener(
+        key === "query" ? "input" : "change",
+        e => {
+          collectionOptions[key] = e.target.value;
+          renderCollectionResults();
+        }
+      );
     }
 
-    const threshold = thresholdForNode(node);
-
-    if (!threshold) return 1;
-
-    let visibility = smoothstep(
-      threshold.start,
-      threshold.fullyVisible,
-      camera.zoom
-    );
-
-    const parent = nodeLookup.get(node.parentId);
-
-    if (parent && parent.type !== "navigation") {
-      const parentThreshold = thresholdForNode(parent);
-
-      if (parentThreshold) {
-        visibility *= smoothstep(
-          parentThreshold.start,
-          parentThreshold.fullyVisible,
-          camera.zoom
-        );
-      }
-    }
-
-    return clamp(visibility, 0, 1);
+    renderCollectionResults();
   }
-
-  function updateVisibility() {
-    if (!allNodes.length) return;
-
-    const zoom = camera.zoom;
-
-    // Maintain readable and tappable stars as
-    // the camera moves between zoom levels.
-    const counterScale = clamp(
-      1 / zoom,
-      .16,
-      3.5
-    );
-
-    const margin = 175;
-
-    allNodes.forEach(node => {
-      if (!node.element) return;
-
-      const visibility = visibilityForNode(node);
-
-      const screen = worldToScreen(
-        node.x,
-        node.y
-      );
-
-      const onScreen =
-        screen.x >= -margin &&
-        screen.x <= innerWidth + margin &&
-        screen.y >= -margin &&
-        screen.y <= innerHeight + margin;
-
-      node.visible = visibility;
-
-      const display =
-        onScreen && visibility > .015;
-
-      node.element.classList.toggle(
-        "is-hidden",
-        !display
-      );
-
-      node.element.style.setProperty(
-        "--visibility",
-        visibility.toFixed(3)
-      );
-
-      node.element.style.setProperty(
-        "--node-scale",
-        counterScale.toFixed(4)
-      );
-
-      node.element.disabled =
-        !display || visibility < .72;
-
-      node.element.tabIndex =
-        display && visibility >= .72 ? 0 : -1;
-    });
-
-    allLines.forEach(line => {
-      if (!line.element) return;
-
-      const a = nodeLookup.get(line.a);
-      const b = nodeLookup.get(line.b);
-
-      if (!a || !b) return;
-
-      const visibility =
-        Math.min(a.visible, b.visible);
-
-      const first = worldToScreen(a.x, a.y);
-      const second = worldToScreen(b.x, b.y);
-
-      const visibleArea =
-        Math.max(first.x, second.x) >= -margin &&
-        Math.min(first.x, second.x) <= innerWidth + margin &&
-        Math.max(first.y, second.y) >= -margin &&
-        Math.min(first.y, second.y) <= innerHeight + margin;
-
-      line.element.style.display =
-        visibleArea && visibility > .02
-          ? ""
-          : "none";
-
-      line.element.style.setProperty(
-        "--visibility",
-        visibility.toFixed(3)
-      );
-    });
-  }
-
-  /* =====================================================
-     10. MAIN NAVIGATION STARS
-
-     These are production-level library views only.
-     They never contain groups, seasons, or episodes.
-  ===================================================== */
 
   function selectStar(node) {
     if (node.type === "navigation") {
-      activateNavigation(node);
+      if (node.action === "settings") {
+        openSettings();
+      } else {
+        openCollection(node.action);
+      }
       return;
     }
 
     if (node.type === "episode") {
       focusNode(node);
-      openEpisodeDetails(node);
+      openEpisode(node);
       return;
     }
 
     focusNode(node);
   }
 
-  function activateNavigation(node) {
-    const action = node.action;
+  /* =====================================================
+     12. SEARCH THE ENTIRE SAVED ARCHIVE
+  ===================================================== */
 
-    if (action === "settings") {
-      openSettings();
+  function globalSearchItems(query) {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+
+    const types = [
+      ["groups", "Group"],
+      ["productions", "Production"],
+      ["seasons", "Season"],
+      ["episodes", "Episode"]
+    ];
+
+    const matches = [];
+
+    for (const [collection, label] of types) {
+      for (const item of state.archive[collection]) {
+        if (titleOf(item).toLowerCase().includes(q)) {
+          matches.push({ ...item, searchType: label });
+        }
+      }
+    }
+
+    return matches.slice(0, 60);
+  }
+
+  function renderSearchResults() {
+    const query = $("#globalSearch").value;
+    const results = $("#searchResults");
+
+    const matches = globalSearchItems(query);
+
+    if (!query.trim()) {
+      results.innerHTML = `
+        <p style="color:#8c89a4;font-size:12px;">
+          Search your saved groups, series, movies, seasons and episodes.
+        </p>
+      `;
       return;
     }
 
-    if (
-      action === "library" ||
-      action === "history" ||
-      action === "rankings" ||
-      action === "watchlist"
-    ) {
-      openCollection(action);
-    }
-  }
-
-  function allProductions() {
-    return state.archive.productions.filter(
-      item => item && typeof item === "object"
-    );
-  }
-
-  function productionRating(item) {
-    const explicit = Number(
-      item.averageRating ??
-      item.calculatedRating ??
-      item.rating
-    );
-
-    return Number.isFinite(explicit)
-      ? explicit
-      : null;
-  }
-
-  function productionLastWatched(item) {
-    const value =
-      item.lastWatched ??
-      item.lastSeen ??
-      item.watchedAt ??
-      null;
-
-    if (!value) return 0;
-
-    const date = new Date(value).getTime();
-
-    return Number.isFinite(date) ? date : 0;
-  }
-
-  function getCollection(type) {
-    const items = [...allProductions()];
-
-    switch (type) {
-
-      case "library":
-        return items.sort((a, b) =>
-          String(a.title || a.name || "")
-            .localeCompare(
-              String(b.title || b.name || ""),
-              undefined,
-              { sensitivity: "base" }
-            )
-        );
-
-      case "history":
-        return items
-          .filter(item =>
-            productionLastWatched(item) > 0
-          )
-          .sort((a, b) =>
-            productionLastWatched(b) -
-            productionLastWatched(a)
-          );
-
-      case "rankings":
-        return items
-          .filter(item =>
-            productionRating(item) !== null
-          )
-          .sort((a, b) =>
-            productionRating(b) -
-            productionRating(a)
-          );
-
-      case "watchlist":
-        return items.filter(item =>
-          item.watchlist === true ||
-          item.status === "Planned" ||
-          item.status === "Watchlist"
-        );
-
-      default:
-        return [];
-    }
-  }
-
-  function openCollection(type) {
-    const titles = {
-      library: "Library",
-      history: "History",
-      rankings: "Rankings",
-      watchlist: "Watchlist"
-    };
-
-    const descriptions = {
-      library: "All your productions, arranged alphabetically.",
-      history: "Productions ordered by the date you last watched them.",
-      rankings: "Your highest-rated productions.",
-      watchlist: "The stories you plan to watch."
-    };
-
-    const items = getCollection(type);
-
-    let content = `
-      <span class="detail-eyebrow">
-        YOUR PERSONAL ARCHIVE
-      </span>
-
-      <h2 id="detailTitle">
-        ${titles[type]}
-      </h2>
-
-      <p>${descriptions[type]}</p>
-    `;
-
-    if (!items.length) {
-      content += `
-        <p style="margin-top:45px;opacity:.68;">
-          Nothing has been added to this collection yet.
-          Your personal entries will appear here once
-          the archive editor is available.
+    if (!matches.length) {
+      results.innerHTML = `
+        <p style="color:#8c89a4;font-size:12px;">
+          No matching entries were found.
         </p>
       `;
-    } else {
-      content += `
-        <div style="margin-top:38px;">
-          ${items.map(item => {
-            const name = escapeHTML(
-              item.title || item.name || "Untitled"
-            );
-
-            const rating = productionRating(item);
-
-            return `
-              <button
-                type="button"
-                class="detail-action collection-entry"
-                data-production-id="${escapeHTML(item.id)}"
-                style="
-                  display:flex;
-                  width:100%;
-                  justify-content:space-between;
-                  align-items:center;
-                  gap:15px;
-                  margin:0;
-                  padding:17px 0;
-                  border:0;
-                  border-bottom:1px solid rgba(205,201,240,.09);
-                  border-radius:0;
-                  background:transparent;
-                  text-align:left;
-                "
-              >
-                <span>${name}</span>
-                <span style="color:#aaa4ca;">
-                  ${rating === null
-                    ? ""
-                    : rating.toFixed(1) + " / 10"}
-                </span>
-              </button>
-            `;
-          }).join("")}
-        </div>
-      `;
+      return;
     }
 
-    openOverlay(content);
+    results.innerHTML = matches.map(item => `
+      <button
+        type="button"
+        class="search-result"
+        data-id="${escapeHTML(item.id)}"
+      >
+        <span>${escapeHTML(titleOf(item))}</span>
+        <small>${escapeHTML(item.searchType)}</small>
+      </button>
+    `).join("");
 
-    $$(".collection-entry").forEach(button => {
-      button.addEventListener("click", () => {
-        const id = button.dataset.productionId;
+    results.querySelectorAll(".search-result")
+      .forEach(button => {
+        button.addEventListener("click", () => {
+          const node = nodeMap.get(button.dataset.id);
+          closeOverlay();
 
-        const node = allNodes.find(
-          item =>
-            item.type === "production" &&
-            item.id === id
-        );
-
-        closeOverlay();
-
-        if (node) {
-          focusNode(node);
-        } else {
-          notify("This production has no map position yet.");
-        }
+          if (node) {
+            focusNode(node);
+          } else {
+            showToast("No constellation position available.");
+          }
+        });
       });
-    });
   }
 
   /* =====================================================
-     11. DETAILS & SETTINGS
+     13. TRANSIENT OVERLAYS
   ===================================================== */
 
-  function openOverlay(html) {
-    previousModalFocus = document.activeElement;
+  function openModal(overlay) {
+    if (activeModal && activeModal !== overlay) {
+      closeOverlay(false);
+    }
 
-    detailContent.innerHTML = html;
+    modalFocus = document.activeElement;
+    activeModal = overlay;
 
-    detailOverlay.classList.add("open");
-
-    detailOverlay.setAttribute(
-      "aria-hidden", "false"
-    );
+    overlay.classList.add("open");
+    overlay.setAttribute("aria-hidden", "false");
 
     viewport.inert = true;
+    $("#globalSearch")?.blur();
+  }
 
+  function openDetail(html) {
+    $("#detailContent").innerHTML = html;
     $("#detailSheet").scrollTop = 0;
+
+    openModal(detailOverlay);
     $("#closeDetailButton").focus();
   }
 
-  function closeOverlay() {
-    detailOverlay.classList.remove("open");
+  function openSearch() {
+    openModal(searchOverlay);
+    $("#globalSearch").value = "";
+    renderSearchResults();
+    $("#globalSearch").focus();
+  }
 
-    detailOverlay.setAttribute(
-      "aria-hidden", "true"
-    );
+  function closeOverlay(restoreFocus = true) {
+    for (const overlay of [detailOverlay, searchOverlay]) {
+      overlay.classList.remove("open");
+      overlay.setAttribute("aria-hidden", "true");
+    }
 
+    activeModal = null;
+    currentCollection = null;
     viewport.inert = false;
 
-    if (previousModalFocus?.isConnected) {
-      previousModalFocus.focus();
-    } else {
-      viewport.focus();
+    if (restoreFocus) {
+      if (modalFocus?.isConnected) {
+        modalFocus.focus();
+      } else {
+        viewport.focus();
+      }
     }
   }
 
-  function openEpisodeDetails(node) {
-    const title = escapeHTML(node.title);
-
-    const notes = escapeHTML(
-      node.data?.notes ||
-      node.data?.observations ||
-      "This episode will receive its full detail page in Step 5."
-    );
-
-    openOverlay(`
+  function openEpisode(node) {
+    openDetail(`
       <span class="detail-eyebrow">EPISODE</span>
-      <h2 id="detailTitle">${title}</h2>
-      <p>${notes}</p>
+      <h2 id="detailTitle">${escapeHTML(node.title)}</h2>
+      <p>
+        ${escapeHTML(
+          node.data?.notes ||
+          node.data?.observations ||
+          "Episode observations and ratings will be added in Step 5 and Step 6."
+        )}
+      </p>
     `);
   }
 
+  /* =====================================================
+     14. SETTINGS
+  ===================================================== */
+
+  function settingRange(id, title, value, min = 0) {
+    return `
+      <div class="detail-row">
+        <label for="${id}">${title}</label>
+        <div>
+          <input
+            id="${id}"
+            class="setting-range"
+            type="range"
+            min="${min}"
+            max="100"
+            step="5"
+            value="${value}"
+          >
+          <output class="setting-value" id="${id}Value">
+            ${value}
+          </output>
+        </div>
+      </div>
+    `;
+  }
+
   function openSettings() {
-    openOverlay(`
-      <span class="detail-eyebrow">
-        YOUR UNIVERSE
-      </span>
-
+    openDetail(`
+      <span class="detail-eyebrow">YOUR UNIVERSE</span>
       <h2 id="detailTitle">Settings</h2>
-
-      <p>
-        Adjust the atmosphere without leaving
-        your personal universe.
-      </p>
+      <p>Adjust the atmosphere of your personal archive.</p>
 
       <h3>Atmosphere</h3>
 
-      <div class="detail-row">
-        <label for="settingDensity">
-          Star density
-        </label>
+      ${settingRange(
+        "settingDensity",
+        "Star density",
+        state.settings.starDensity,
+        10
+      )}
 
-        <div>
-          <input
-            id="settingDensity"
-            class="setting-range"
-            type="range"
-            min="10"
-            max="100"
-            step="5"
-            value="${state.settings.starDensity}"
-          >
+      ${settingRange(
+        "settingBrightness",
+        "Star brightness",
+        state.settings.starBrightness,
+        10
+      )}
 
-          <output id="densityOutput">
-            ${state.settings.starDensity}
-          </output>
-        </div>
-      </div>
+      ${settingRange(
+        "settingNebula",
+        "Nebula intensity",
+        state.settings.nebulaIntensity
+      )}
 
-      <div class="detail-row">
-        <label for="settingBrightness">
-          Star brightness
-        </label>
-
-        <div>
-          <input
-            id="settingBrightness"
-            class="setting-range"
-            type="range"
-            min="10"
-            max="100"
-            step="5"
-            value="${state.settings.starBrightness}"
-          >
-
-          <output id="brightnessOutput">
-            ${state.settings.starBrightness}
-          </output>
-        </div>
-      </div>
+      ${settingRange(
+        "settingGlow",
+        "Constellation glow",
+        state.settings.constellationGlow
+      )}
 
       <div class="detail-row">
-        <label for="settingMotion">
-          Reduce motion
-        </label>
-
+        <label for="settingMotion">Reduce motion</label>
         <input
           id="settingMotion"
-          class="motion-toggle"
+          class="motion-checkbox"
           type="checkbox"
           ${state.settings.reduceMotion ? "checked" : ""}
         >
@@ -1459,79 +2268,56 @@
       <h3>Storage & Backups</h3>
 
       <p>
-        Your archive is saved locally in this browser.
-        Export backups regularly, especially before
-        clearing browser data or changing devices.
+        Your archive is saved in this browser.
+        Export a backup regularly to protect your records.
       </p>
 
-      <button
-        id="exportButton"
-        class="detail-action"
-        type="button"
-      >
+      <button id="exportButton" class="detail-action">
         Export archive ↗
       </button>
 
-      <button
-        id="importButton"
-        class="detail-action"
-        type="button"
-      >
+      <button id="importButton" class="detail-action">
         Import archive ↙
       </button>
     `);
 
-    $("#settingDensity").addEventListener(
-      "input",
-      event => {
-        const value = Number(event.target.value);
+    const ranges = [
+      ["settingDensity", "starDensity", () =>
+        backgroundRenderer.rebuild()
+      ],
+      ["settingBrightness", "starBrightness", () => {}],
+      ["settingNebula", "nebulaIntensity", () => {}],
+      ["settingGlow", "constellationGlow", () => {}]
+    ];
 
-        state.settings.starDensity = value;
-        $("#densityOutput").textContent = value;
+    for (const [id, key, callback] of ranges) {
+      $("#" + id).addEventListener("input", e => {
+        state.settings[key] = Number(e.target.value);
+        $("#" + id + "Value").textContent = e.target.value;
 
-        background.rebuild();
-        saveState();
-      }
-    );
+        callback();
+        saveStorage();
+        canvasDirty = true;
+      });
+    }
 
-    $("#settingBrightness").addEventListener(
-      "input",
-      event => {
-        const value = Number(event.target.value);
-
-        state.settings.starBrightness = value;
-        $("#brightnessOutput").textContent = value;
-
-        background.draw(performance.now());
-        saveState();
-      }
-    );
-
-    $("#settingMotion").addEventListener(
-      "change",
-      event => {
-        state.settings.reduceMotion =
-          event.target.checked;
-
-        applyMotionSettings();
-        background.draw(performance.now());
-        saveState();
-      }
-    );
+    $("#settingMotion").addEventListener("change", e => {
+      state.settings.reduceMotion = e.target.checked;
+      applyMotionPreference();
+      saveStorage();
+    });
 
     $("#exportButton").addEventListener(
-      "click",
-      exportBackup
+      "click", exportBackup
     );
 
     $("#importButton").addEventListener(
-      "click",
-      () => $("#importFile").click()
+      "click", () => $("#importFile").click()
     );
   }
 
   /* =====================================================
-     12. EXPORT / IMPORT
+     15. EXPORT / IMPORT
   ===================================================== */
 
   function exportBackup() {
@@ -1548,25 +2334,19 @@
     );
 
     const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
 
-    const link = document.createElement("a");
+    anchor.href = url;
+    anchor.download =
+      `watch-archive-${new Date().toISOString().slice(0,10)}.json`;
 
-    link.href = url;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
 
-    link.download =
-      "watch-archive-" +
-      new Date().toISOString().slice(0, 10) +
-      ".json";
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-    }, 1000);
-
-    notify("Archive backup prepared.");
+    showToast("Backup prepared.");
   }
 
   async function importBackup(file) {
@@ -1574,755 +2354,186 @@
 
     try {
       const text = await file.text();
-
       const backup = JSON.parse(text);
 
       if (
         backup.app !== DATA.appName ||
         backup.schemaVersion !== DATA.schemaVersion ||
-        !backup.data ||
-        !backup.data.archive ||
+        !backup.data?.archive ||
         !["groups", "productions", "seasons", "episodes"]
           .every(key =>
             Array.isArray(backup.data.archive[key])
           )
       ) {
-        throw new Error("Invalid backup format");
+        throw new Error("Invalid backup structure");
       }
 
-      const confirmed = confirm(
-        "Import this archive?\n\n" +
-        "Your current local archive will be replaced. " +
-        "Export your existing data first if needed."
-      );
+      if (!confirm(
+        "Replace your current local archive with this backup?\n" +
+        "Export your existing archive first if you want to keep it."
+      )) return;
 
-      if (!confirmed) return;
-
-      const oldState = state;
-
+      const previous = state;
       state = normalizeState(backup.data);
 
-      if (!saveState()) {
-        state = oldState;
+      if (!saveStorage()) {
+        state = previous;
         return;
       }
 
       closeOverlay();
 
-      applyMotionSettings();
+      backgroundRenderer.rebuild();
+      rebuildUniverse();
+      applyMotionPreference();
+      goHome();
 
-      background.rebuild();
-
-      buildUniverse();
-      renderUniverse();
-
-      focusMainConstellation();
-
-      notify("Archive imported successfully.");
+      showToast("Archive imported.");
 
     } catch (error) {
-      console.error(error);
-      notify("Import failed. Check the backup file.");
-
+      console.error("Import failed:", error);
+      showToast("Invalid or incompatible archive file.");
     } finally {
       $("#importFile").value = "";
     }
   }
 
   /* =====================================================
-     13. BACKGROUND STARFIELD
-
-     Background stars move at different parallax
-     speeds when the camera travels.
-
-     Rendered on a separate canvas for performance.
-  ===================================================== */
-
-  class CosmicBackground {
-
-    constructor(canvas) {
-      this.canvas = canvas;
-      this.ctx = canvas.getContext("2d");
-
-      this.stars = [];
-
-      this.width = 0;
-      this.height = 0;
-
-      this.cameraX = 0;
-      this.cameraY = 0;
-
-      this.running = false;
-      this.frame = null;
-      this.lastFrame = 0;
-
-      this.rebuild();
-    }
-
-    rebuild() {
-      if (!this.ctx) return;
-
-      this.width = innerWidth;
-      this.height = innerHeight;
-
-      const dpr = Math.min(
-        devicePixelRatio || 1,
-        1.5
-      );
-
-      this.canvas.width = Math.round(
-        this.width * dpr
-      );
-
-      this.canvas.height = Math.round(
-        this.height * dpr
-      );
-
-      this.ctx.setTransform(
-        dpr, 0, 0, dpr, 0, 0
-      );
-
-      const density =
-        state.settings.starDensity / 100;
-
-      const count = clamp(
-        Math.round(
-          this.width * this.height *
-          .00056 * density
-        ),
-        90,
-        1400
-      );
-
-      this.stars = [];
-
-      for (let i = 0; i < count; i++) {
-        const large = Math.random() > .965;
-
-        this.stars.push({
-          x: Math.random() * this.width,
-          y: Math.random() * this.height,
-
-          radius: large
-            ? 1 + Math.random() * .75
-            : .22 + Math.random() * .65,
-
-          alpha: .15 + Math.random() * .7,
-
-          depth: .025 + Math.random() * .19,
-
-          phase: Math.random() * Math.PI * 2,
-
-          speed: .00012 + Math.random() * .00043,
-
-          warm: Math.random() < .075
-        });
-      }
-
-      this.draw(performance.now());
-    }
-
-    setCamera(x, y) {
-      this.cameraX = x;
-      this.cameraY = y;
-
-      if (motionReduced() || !this.running) {
-        this.draw(performance.now());
-      }
-    }
-
-    draw(time) {
-      if (!this.ctx) return;
-
-      const ctx = this.ctx;
-
-      ctx.clearRect(
-        0, 0,
-        this.width,
-        this.height
-      );
-
-      const brightness =
-        state.settings.starBrightness / 100;
-
-      for (const star of this.stars) {
-        const x = (
-          (
-            star.x -
-            this.cameraX * star.depth
-          ) % this.width +
-          this.width
-        ) % this.width;
-
-        const y = (
-          (
-            star.y -
-            this.cameraY * star.depth
-          ) % this.height +
-          this.height
-        ) % this.height;
-
-        const twinkle = motionReduced()
-          ? 1
-          : .82 + Math.sin(
-              time * star.speed + star.phase
-            ) * .18;
-
-        const opacity = clamp(
-          star.alpha *
-          twinkle *
-          (.35 + brightness * 1.13),
-          0, 1
-        );
-
-        ctx.beginPath();
-
-        ctx.arc(
-          x, y,
-          star.radius,
-          0,
-          Math.PI * 2
-        );
-
-        ctx.fillStyle = star.warm
-          ? `rgba(230,211,229,${opacity})`
-          : `rgba(211,219,246,${opacity})`;
-
-        ctx.fill();
-      }
-    }
-
-    start() {
-      if (this.running || !this.ctx) return;
-
-      this.running = true;
-
-      const loop = time => {
-        if (!this.running) return;
-
-        if (time - this.lastFrame >= 33) {
-          this.draw(time);
-          this.lastFrame = time;
-        }
-
-        this.frame = requestAnimationFrame(loop);
-      };
-
-      this.frame = requestAnimationFrame(loop);
-    }
-
-    stop() {
-      this.running = false;
-
-      if (this.frame != null) {
-        cancelAnimationFrame(this.frame);
-        this.frame = null;
-      }
-    }
-  }
-
-  /* =====================================================
-     14. FREE MOVEMENT AND TOUCH GESTURES
-
-     - Drag in any direction
-     - Pinch to zoom
-     - Zoom around gesture center
-     - Tap stars without triggering dragging
-  ===================================================== */
-
-  function pointerPoint(event) {
-    return {
-      x: event.clientX,
-      y: event.clientY
-    };
-  }
-
-  function midpoint(a, b) {
-    return {
-      x: (a.x + b.x) / 2,
-      y: (a.y + b.y) / 2
-    };
-  }
-
-  function pointerDistance(a, b) {
-    return Math.hypot(
-      a.x - b.x,
-      a.y - b.y
-    );
-  }
-
-  function bindGestures() {
-
-    viewport.addEventListener(
-      "pointerdown",
-      event => {
-
-        if (
-          event.pointerType === "mouse" &&
-          event.button !== 0
-        ) {
-          return;
-        }
-
-        cancelCameraAnimation();
-
-        const point = pointerPoint(event);
-
-        activePointers.set(
-          event.pointerId,
-          point
-        );
-
-        if (activePointers.size === 1) {
-          gestureMoved = false;
-
-          gesture = {
-            type: "drag",
-            start: point,
-            last: point,
-            totalDistance: 0
-          };
-        }
-
-        if (activePointers.size >= 2) {
-          const [a, b] =
-            [...activePointers.values()];
-
-          const center = midpoint(a, b);
-
-          gesture = {
-            type: "pinch",
-            distance: Math.max(
-              1,
-              pointerDistance(a, b)
-            ),
-
-            startZoom: camera.zoom,
-
-            anchor: screenToWorld(
-              center.x,
-              center.y
-            )
-          };
-
-          gestureMoved = true;
-          suppressClickUntil =
-            performance.now() + 500;
-        }
-      }
-    );
-
-    viewport.addEventListener(
-      "pointermove",
-      event => {
-
-        if (!activePointers.has(event.pointerId)) {
-          return;
-        }
-
-        const previous =
-          activePointers.get(event.pointerId);
-
-        const current = pointerPoint(event);
-
-        activePointers.set(
-          event.pointerId,
-          current
-        );
-
-        if (activePointers.size >= 2) {
-          const [a, b] =
-            [...activePointers.values()];
-
-          const center = midpoint(a, b);
-
-          if (!gesture || gesture.type !== "pinch") {
-            gesture = {
-              type: "pinch",
-              distance: Math.max(
-                1,
-                pointerDistance(a, b)
-              ),
-              startZoom: camera.zoom,
-              anchor: screenToWorld(
-                center.x,
-                center.y
-              )
-            };
-          }
-
-          const currentDistance = Math.max(
-            1,
-            pointerDistance(a, b)
-          );
-
-          const newZoom = clamp(
-            gesture.startZoom *
-            currentDistance /
-            gesture.distance,
-            MIN_ZOOM,
-            MAX_ZOOM
-          );
-
-          camera.zoom = newZoom;
-
-          camera.x = gesture.anchor.x -
-            (center.x - innerWidth / 2) / newZoom;
-
-          camera.y = gesture.anchor.y -
-            (center.y - innerHeight / 2) / newZoom;
-
-          gestureMoved = true;
-
-          suppressClickUntil =
-            performance.now() + 450;
-
-          viewport.classList.add("dragging");
-
-          renderCamera();
-          return;
-        }
-
-        if (
-          !gesture ||
-          gesture.type !== "drag"
-        ) {
-          gesture = {
-            type: "drag",
-            start: current,
-            last: previous,
-            totalDistance: 0
-          };
-        }
-
-        const dx = current.x - previous.x;
-        const dy = current.y - previous.y;
-
-        gesture.totalDistance += Math.hypot(
-          dx, dy
-        );
-
-        if (
-          gesture.totalDistance >
-          DATA.camera.tapMovementThreshold
-        ) {
-          gestureMoved = true;
-
-          suppressClickUntil =
-            performance.now() + 450;
-
-          viewport.classList.add("dragging");
-
-          if (
-            !viewport.hasPointerCapture(event.pointerId)
-          ) {
-            viewport.setPointerCapture(
-              event.pointerId
-            );
-          }
-        }
-
-        camera.x -= dx / camera.zoom;
-        camera.y -= dy / camera.zoom;
-
-        renderCamera();
-      }
-    );
-
-    function endPointer(event) {
-      if (!activePointers.has(event.pointerId)) {
-        return;
-      }
-
-      activePointers.delete(event.pointerId);
-
-      if (
-        viewport.hasPointerCapture(event.pointerId)
-      ) {
-        viewport.releasePointerCapture(
-          event.pointerId
-        );
-      }
-
-      if (gestureMoved) {
-        suppressClickUntil =
-          performance.now() + 350;
-      }
-
-      if (activePointers.size === 0) {
-        gesture = null;
-        gestureMoved = false;
-
-        viewport.classList.remove("dragging");
-      } else if (activePointers.size === 1) {
-        const remaining =
-          [...activePointers.values()][0];
-
-        gesture = {
-          type: "drag",
-          start: remaining,
-          last: remaining,
-          totalDistance: 0
-        };
-      }
-    }
-
-    viewport.addEventListener(
-      "pointerup",
-      endPointer
-    );
-
-    viewport.addEventListener(
-      "pointercancel",
-      endPointer
-    );
-
-    viewport.addEventListener(
-      "lostpointercapture",
-      event => {
-        if (activePointers.has(event.pointerId)) {
-          activePointers.delete(event.pointerId);
-        }
-
-        if (activePointers.size === 0) {
-          gesture = null;
-          viewport.classList.remove("dragging");
-        }
-      }
-    );
-
-    viewport.addEventListener(
-      "click",
-      event => {
-        if (
-          performance.now() <
-          suppressClickUntil
-        ) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-        }
-      },
-      true
-    );
-
-    viewport.addEventListener(
-      "wheel",
-      event => {
-        event.preventDefault();
-
-        const factor = Math.exp(
-          -event.deltaY *
-          DATA.camera.zoomSensitivity
-        );
-
-        zoomAt(
-          event.clientX,
-          event.clientY,
-          factor
-        );
-      },
-      { passive: false }
-    );
-
-    viewport.addEventListener(
-      "keydown",
-      event => {
-
-        if (event.target !== viewport) return;
-
-        const step = 90 / camera.zoom;
-
-        switch (event.key) {
-
-          case "ArrowUp":
-            camera.y -= step;
-            break;
-
-          case "ArrowDown":
-            camera.y += step;
-            break;
-
-          case "ArrowLeft":
-            camera.x -= step;
-            break;
-
-          case "ArrowRight":
-            camera.x += step;
-            break;
-
-          case "+":
-          case "=":
-            zoomAt(
-              innerWidth / 2,
-              innerHeight / 2,
-              1.25
-            );
-            break;
-
-          case "-":
-            zoomAt(
-              innerWidth / 2,
-              innerHeight / 2,
-              .8
-            );
-            break;
-
-          default:
-            return;
-        }
-
-        event.preventDefault();
-
-        renderCamera();
-      }
-    );
-  }
-
-  /* =====================================================
-     15. FIXED CONTROLS
+     16. CONTROLS & LIFECYCLE
   ===================================================== */
 
   function bindControls() {
-    $("#homeButton").addEventListener(
-      "click",
-      focusMainConstellation
-    );
+    $("#homeButton").addEventListener("click", goHome);
 
-    $("#focusButton").addEventListener(
-      "click",
-      () => {
-        if (lastFocusedNode) {
-          focusNode(lastFocusedNode);
-        } else {
-          focusMainConstellation();
-        }
+    $("#focusButton").addEventListener("click", () => {
+      if (lastFocus) {
+        focusNode(lastFocus);
+      } else {
+        const closest = nodes
+          .filter(n => n.visible > .6)
+          .map(n => ({
+            node: n,
+            distance: Math.hypot(
+              n.screenX - width / 2,
+              n.screenY - height / 2
+            )
+          }))
+          .sort((a, b) => a.distance - b.distance)[0];
+
+        if (closest) focusNode(closest.node);
+        else goHome();
       }
+    });
+
+    $("#searchButton").addEventListener(
+      "click", openSearch
     );
 
     $("#closeDetailButton").addEventListener(
-      "click",
-      closeOverlay
+      "click", () => closeOverlay()
     );
 
     $("#detailBackdrop").addEventListener(
-      "click",
-      closeOverlay
+      "click", () => closeOverlay()
     );
 
-    window.addEventListener(
-      "keydown",
-      event => {
-        if (
-          event.key === "Escape" &&
-          detailOverlay.classList.contains("open")
-        ) {
-          closeOverlay();
+    $("#closeSearchButton").addEventListener(
+      "click", () => closeOverlay()
+    );
+
+    $("#searchBackdrop").addEventListener(
+      "click", () => closeOverlay()
+    );
+
+    $("#globalSearch").addEventListener(
+      "input", renderSearchResults
+    );
+
+    $("#importFile").addEventListener("change", e => {
+      importBackup(e.target.files?.[0]);
+    });
+
+    window.addEventListener("keydown", e => {
+      if (e.key === "Escape" && activeModal) {
+        closeOverlay();
+      }
+    });
+
+    let resizeTimer;
+
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+
+      resizeTimer = setTimeout(() => {
+        const wasMobile = width < 650;
+        const nowMobile = innerWidth < 650;
+
+        resizeAllCanvases();
+
+        if (wasMobile !== nowMobile) {
+          rebuildUniverse();
+          goHome();
         }
-      }
-    );
 
-    $("#importFile").addEventListener(
-      "change",
-      event => {
-        importBackup(event.target.files?.[0]);
-      }
-    );
-
-    motionPreference.addEventListener(
-      "change",
-      () => {
-        applyMotionSettings();
-
-        background.draw(performance.now());
-      }
-    );
+        canvasDirty = true;
+      }, 150);
+    });
 
     document.addEventListener(
       "visibilitychange",
       () => {
         if (document.hidden) {
-          background.stop();
+          stopRenderLoop();
         } else {
-          background.start();
+          lastFrameTime = 0;
+          canvasDirty = true;
+          startRenderLoop();
         }
       }
     );
 
-    let resizeTimer;
-
-    window.addEventListener(
-      "resize",
-      () => {
-        clearTimeout(resizeTimer);
-
-        resizeTimer = setTimeout(() => {
-          background.rebuild();
-
-          const wasMobileLayout =
-            allNodes.find(n => n.id === "nav-library");
-
-          const expectedX =
-            DATA.navigation.nodes[0].x *
-            mobileNavigationScale();
-
-          if (
-            wasMobileLayout &&
-            Math.abs(wasMobileLayout.x - expectedX) > 1
-          ) {
-            buildUniverse();
-            renderUniverse();
-          }
-
-          renderCamera();
-        }, 180);
-      }
+    reducedMedia.addEventListener(
+      "change",
+      applyMotionPreference
     );
 
-    window.addEventListener(
-      "storage",
-      event => {
-        if (event.key !== DATA.storageKey) {
-          return;
-        }
+    window.addEventListener("storage", e => {
+      if (e.key !== DATA.storageKey) return;
 
-        state = loadState();
+      state = readStorage();
+      rebuildUniverse();
+      backgroundRenderer.rebuild();
+      applyMotionPreference();
 
-        applyMotionSettings();
-        background.rebuild();
-
-        buildUniverse();
-        renderUniverse();
-
-        notify("Archive refreshed.");
-      }
-    );
+      showToast("Archive refreshed from another tab.");
+    });
   }
 
   /* =====================================================
-     16. INITIALIZE
+     17. INITIALIZATION
   ===================================================== */
 
   function initialize() {
-    applyMotionSettings();
+    applyMotionPreference();
 
-    background = new CosmicBackground(
-      $("#backgroundStars")
-    );
-
-    buildUniverse();
-    renderUniverse();
+    resizeAllCanvases();
+    rebuildUniverse();
 
     bindGestures();
     bindControls();
 
-    // Start by fitting the main Cassiopeia
-    // constellation into the current screen.
-    focusMainConstellation();
+    const initial = fitNavigation();
 
-    background.start();
+    setCamera(
+      initial.x,
+      initial.y,
+      initial.zoom
+    );
+
+    startRenderLoop();
 
     if (!localStorage.getItem(DATA.storageKey)) {
-      saveState();
+      saveStorage();
     }
   }
 
