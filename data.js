@@ -2,38 +2,33 @@
 "use strict";
 
 /*
-  WATCH ARCHIVE
-  STEP 1C.1 — UNIVERSE DATA
+  WATCH ARCHIVE — STEP 2
+  Cosmic Library Configuration
 
-  All positions are world coordinates.
-  Group positions are independent from
-  the main navigation constellation.
-
-  Real user entries will be stored locally,
-  not published inside this file.
+  Private archive entries are never
+  stored in this public source file.
 */
 
 window.WATCH_DATA = {
 
   appName: "Watch Archive",
-
-  version: "1.2.0",
-
+  version: "2.0.0",
   schemaVersion: 1,
-
   storageKey: "watch_archive_v1",
 
 
   /* =====================================
-     STORAGE DEFAULTS
+     DEFAULT STORAGE
   ===================================== */
 
   defaults: {
-
     settings: {
-      starDensity: 65,
-      starBrightness: 55,
-      reduceMotion: false
+      starDensity: 75,
+      starBrightness: 60,
+      reduceMotion: false,
+
+      nebulaIntensity: 65,
+      constellationGlow: 65
     },
 
     archive: {
@@ -42,132 +37,197 @@ window.WATCH_DATA = {
       seasons: [],
       episodes: []
     }
-
   },
 
 
   /* =====================================
-     CAMERA CONFIGURATION
+     CAMERA
+
+     Higher maximum zoom for exploring
+     nested constellations.
+
+     Camera animations use logarithmic
+     interpolation and fixed-screen labels.
   ===================================== */
 
   camera: {
-    minZoom: 0.12,
-    maxZoom: 12,
+    minZoom: 0.10,
+    maxZoom: 24,
 
-    initialZoom: 0.75,
+    initialZoom: 0.8,
 
-    zoomSensitivity: 0.0012,
+    wheelSensitivity: 0.0011,
+    pinchSensitivity: 1,
 
-    transitionDuration: 850,
+    travelDuration: 1000,
 
-    tapMovementThreshold: 9
+    tapThreshold: 10,
+
+    smoothness: 0.16
+  },
+
+
+  /* =====================================
+     GRAPHICS QUALITY
+
+     Adaptive rendering will adjust to
+     device capabilities in app.js.
+  ===================================== */
+
+  graphics: {
+    maxPixelRatio: 1.5,
+
+    targetFrameRate: 60,
+
+    backgroundStarCount: 1250,
+
+    maximumBackgroundStars: 1900,
+
+    nebulaResolution: 0.62,
+
+    nebulaCloudCount: 8,
+
+    nebulaDetail: 4,
+
+    enableParallax: true,
+
+    enableTwinkling: true,
+
+    adaptiveQuality: true
+  },
+
+
+  /* =====================================
+     CONSTELLATION APPEARANCE
+  ===================================== */
+
+  appearance: {
+    navigationStars: {
+      radius: 5.0,
+      glow: 35,
+      color: [232, 235, 255]
+    },
+
+    groupStars: {
+      radius: 3.9,
+      glow: 28,
+      color: [209, 201, 255]
+    },
+
+    productionStars: {
+      radius: 3.0,
+      glow: 21,
+      color: [196, 204, 255]
+    },
+
+    seasonStars: {
+      radius: 2.3,
+      glow: 16,
+      color: [201, 204, 245]
+    },
+
+    episodeStars: {
+      radius: 1.7,
+      glow: 11,
+      color: [199, 207, 242]
+    },
+
+    lineOpacity: 0.26,
+
+    activeLineOpacity: 0.65
   },
 
 
   /* =====================================
      SEMANTIC ZOOM
 
-     Children are revealed by camera zoom,
-     rather than switching between pages.
+     Children reveal progressively
+     as camera zoom increases.
 
-     Each level can also depend on the
-     distance from its parent star.
+     Parent and child systems remain in
+     the same coordinate space.
   ===================================== */
 
   semanticZoom: {
-
-    groupContents: {
-      start: 1.15,
-      fullyVisible: 1.95
+    productions: {
+      start: 1.10,
+      full: 2.0
     },
 
-    productionContents: {
-      start: 2.5,
-      fullyVisible: 3.5
+    seasons: {
+      start: 2.7,
+      full: 4.5
     },
 
-    seasonContents: {
-      start: 4.5,
-      fullyVisible: 6
-    },
-
-    episodeDetails: {
-      start: 7,
-      fullyVisible: 9
+    episodes: {
+      start: 6.0,
+      full: 9.0
     }
-
   },
 
 
   /* =====================================
-     MAIN NAVIGATION CONSTELLATION
+     MAIN CONSTELLATION
 
-     Cassiopeia-inspired irregular pattern.
-     Ordered:
-     Library → History → Rankings →
-     Watchlist → Settings
+     Cassiopeia-inspired irregular zigzag.
+
+     Order:
+     Library
+     History
+     Rankings
+     Watchlist
+     Settings
   ===================================== */
 
   navigation: {
-
     id: "main-navigation",
-
-    name: "The Observatory",
-
     type: "navigation",
 
     nodes: [
-
       {
         id: "library",
         title: "Library",
-        type: "navigation",
-        x: -550,
-        y: -75,
-        size: 11,
+        x: -520,
+        y: -70,
+        magnitude: 1.5,
         action: "library"
       },
 
       {
         id: "history",
         title: "History",
-        type: "navigation",
-        x: -285,
-        y: 70,
-        size: 9,
+        x: -260,
+        y: 80,
+        magnitude: 2.3,
         action: "history"
       },
 
       {
         id: "rankings",
         title: "Rankings",
-        type: "navigation",
-        x: -35,
-        y: -190,
-        size: 12,
+        x: -10,
+        y: -205,
+        magnitude: 1.2,
         action: "rankings"
       },
 
       {
         id: "watchlist",
         title: "Watchlist",
-        type: "navigation",
-        x: 250,
+        x: 255,
         y: 15,
-        size: 10,
+        magnitude: 1.9,
         action: "watchlist"
       },
 
       {
         id: "settings",
         title: "Settings",
-        type: "navigation",
-        x: 550,
-        y: -275,
-        size: 11,
+        x: 530,
+        y: -255,
+        magnitude: 2.0,
         action: "settings"
       }
-
     ],
 
     connections: [
@@ -176,62 +236,68 @@ window.WATCH_DATA = {
       ["rankings", "watchlist"],
       ["watchlist", "settings"]
     ]
-
   },
 
 
   /* =====================================
-     GROUP CONSTELLATION SPREAD
+     GROUP PLACEMENT
 
-     Real groups will be assigned positions
-     scattered through the surrounding sky.
+     Individual groups exist separately,
+     scattered around the same world.
   ===================================== */
 
   groupPlacement: {
+    initialRadius: 1450,
 
-    minimumDistanceFromNavigation: 950,
+    minimumSpacing: 750,
 
-    minimumDistanceBetweenGroups: 650,
+    distanceGrowth: 350,
 
-    preferredDistance: 1500,
+    angleOffset: -0.62,
 
-    outerRadius: 16000,
-
-    layoutSeed: 73129
-
+    seed: 73129
   },
 
 
   /* =====================================
-     DEMONSTRATION GROUPS
+     ONLY DEMONSTRATION GROUP
 
-     These are purely visual test objects.
-     They are NOT added to personal storage.
-
-     They can be removed automatically once
-     the real archive editor is implemented.
+     Not stored in the personal archive.
+     No Harry Potter or Star Wars demos.
   ===================================== */
 
   demoGroups: [
-
     {
       id: "demo-asoiaf",
       title: "A Song of Ice and Fire",
       type: "group",
       demo: true,
 
-      x: 1550,
-      y: -950,
+      x: 1380,
+      y: -760,
+
+      genres: ["Fantasy", "Drama"],
+
+      subgenres: [
+        "Dragons",
+        "Political Intrigue",
+        "Medieval Fantasy"
+      ],
+
+      thoughts: "",
 
       children: [
-
         {
           id: "demo-got",
           title: "Game of Thrones",
           type: "production",
 
-          children: [
+          mediaType: "TV Series",
+          startYear: 2011,
+          endYear: 2019,
+          status: "Finished",
 
+          children: [
             {
               id: "demo-got-s1",
               title: "Season 1",
@@ -242,18 +308,23 @@ window.WATCH_DATA = {
                   id: "demo-got-e1",
                   title: "Winter Is Coming",
                   type: "episode",
+                  duration: 62,
                   children: []
                 },
+
                 {
                   id: "demo-got-e2",
                   title: "The Kingsroad",
                   type: "episode",
+                  duration: 56,
                   children: []
                 },
+
                 {
                   id: "demo-got-e3",
                   title: "Lord Snow",
                   type: "episode",
+                  duration: 58,
                   children: []
                 }
               ]
@@ -272,7 +343,6 @@ window.WATCH_DATA = {
               type: "season",
               children: []
             }
-
           ]
         },
 
@@ -281,6 +351,10 @@ window.WATCH_DATA = {
           title: "House of the Dragon",
           type: "production",
 
+          mediaType: "TV Series",
+          startYear: 2022,
+          endYear: null,
+
           children: [
             {
               id: "demo-hotd-s1",
@@ -288,6 +362,7 @@ window.WATCH_DATA = {
               type: "season",
               children: []
             },
+
             {
               id: "demo-hotd-s2",
               title: "Season 2",
@@ -301,128 +376,140 @@ window.WATCH_DATA = {
           id: "demo-knight",
           title: "A Knight of the Seven Kingdoms",
           type: "production",
+
+          mediaType: "TV Series",
+
           children: []
         }
-
       ]
-
-    },
-
-
-    {
-      id: "demo-harrypotter",
-      title: "Harry Potter",
-      type: "group",
-      demo: true,
-
-      x: -1900,
-      y: -1250,
-
-      children: [
-
-        {
-          id: "demo-hp1",
-          title: "Philosopher's Stone",
-          type: "production",
-          children: []
-        },
-
-        {
-          id: "demo-hp2",
-          title: "Chamber of Secrets",
-          type: "production",
-          children: []
-        },
-
-        {
-          id: "demo-hp3",
-          title: "Prisoner of Azkaban",
-          type: "production",
-          children: []
-        }
-
-      ]
-
-    },
-
-
-    {
-      id: "demo-starwars",
-      title: "Star Wars",
-      type: "group",
-      demo: true,
-
-      x: 2400,
-      y: 1200,
-
-      children: [
-
-        {
-          id: "demo-sw1",
-          title: "A New Hope",
-          type: "production",
-          children: []
-        },
-
-        {
-          id: "demo-sw2",
-          title: "The Empire Strikes Back",
-          type: "production",
-          children: []
-        },
-
-        {
-          id: "demo-sw3",
-          title: "Return of the Jedi",
-          type: "production",
-          children: []
-        }
-
-      ]
-
     }
-
   ],
 
 
   /* =====================================
-     PRODUCTION LIBRARY RULES
+     LIBRARY VIEWS
 
-     The main navigation does NOT list
-     groups, seasons, or episodes.
+     Every collection here operates on
+     productions ONLY.
+
+     Groups, seasons and episodes are
+     excluded from these lists.
   ===================================== */
 
   libraryViews: {
-
     library: {
+      title: "Library",
+      description: "Every story in your collection.",
       entityType: "production",
-      sortBy: "title",
-      direction: "asc"
+      defaultSort: "alphabetical"
     },
 
     history: {
+      title: "History",
+      description: "The stories you've watched.",
       entityType: "production",
-      sortBy: "lastWatched",
-      direction: "desc"
+      defaultSort: "lastWatched"
     },
 
     rankings: {
+      title: "Rankings",
+      description: "Your highest-rated stories.",
       entityType: "production",
-      sortBy: "averageRating",
-      direction: "desc"
+      defaultSort: "highestRated"
     },
 
     watchlist: {
+      title: "Watchlist",
+      description: "Stories waiting to be discovered.",
       entityType: "production",
-      filterBy: "watchlist",
-      direction: "asc"
+      defaultSort: "alphabetical"
     }
-
   },
 
 
   /* =====================================
-     MEDIA TYPES & STATUSES
+     SORTING
+  ===================================== */
+
+  sorting: [
+    {
+      id: "alphabetical",
+      title: "Alphabetical · A–Z"
+    },
+
+    {
+      id: "alphabeticalReverse",
+      title: "Alphabetical · Z–A"
+    },
+
+    {
+      id: "highestRated",
+      title: "Highest Rated"
+    },
+
+    {
+      id: "lowestRated",
+      title: "Lowest Rated"
+    },
+
+    {
+      id: "lastWatched",
+      title: "Last Watched"
+    },
+
+    {
+      id: "oldestAdded",
+      title: "Oldest Added"
+    },
+
+    {
+      id: "newestAdded",
+      title: "Newest Added"
+    },
+
+    {
+      id: "earliestRelease",
+      title: "Earliest Release"
+    },
+
+    {
+      id: "latestRelease",
+      title: "Latest Release"
+    }
+  ],
+
+
+  /* =====================================
+     GENRES
+
+     Main genres are broad categories.
+     Secondary genres/tags can be expanded
+     freely in a later editing batch.
+  ===================================== */
+
+  mainGenres: [
+    "Action",
+    "Adventure",
+    "Animation",
+    "Comedy",
+    "Crime",
+    "Documentary",
+    "Drama",
+    "Fantasy",
+    "Historical",
+    "Horror",
+    "Mystery",
+    "Romance",
+    "Science Fiction",
+    "Thriller",
+    "War",
+    "Western",
+    "Other"
+  ],
+
+
+  /* =====================================
+     MEDIA TYPES & WATCHING STATUSES
   ===================================== */
 
   mediaTypes: [
@@ -443,10 +530,19 @@ window.WATCH_DATA = {
     "Planned"
   ],
 
+
+  /* =====================================
+     FUTURE RATING ENGINE
+  ===================================== */
+
   ratings: {
     minimum: 1,
     maximum: 10,
-    increment: 0.5
+    increment: 0.5,
+
+    decimalPlaces: 2,
+
+    ignoreUnrated: true
   }
 
 };
