@@ -3,33 +3,53 @@
 
 (() => {
   const CONFIG = window.WATCH_DATA;
-  if (!CONFIG) {
-    console.error("Missing data.js");
-    return;
-  }
+  if (!CONFIG) return;
 
-  const $ = (selector) => document.querySelector(selector);
-  const $$ = (selector) => [...document.querySelectorAll(selector)];
-  const clone = (value) => JSON.parse(JSON.stringify(value));
-  const storageKey = CONFIG.storageKey;
+  const $ = s => document.querySelector(s);
+  const $$ = s => [...document.querySelectorAll(s)];
+  const clone = value => JSON.parse(JSON.stringify(value));
 
-  const systemMotion = window.matchMedia(
+  const STORAGE_KEY = CONFIG.storageKey;
+  const MIN_ZOOM = 0.18;
+  const MAX_ZOOM = 3.8;
+  const TAP_THRESHOLD = 9;
+
+  const systemMotion = matchMedia(
     "(prefers-reduced-motion: reduce)"
   );
 
+  const viewport = $("#viewport");
+  const world = $("#world");
+  const layer = $("#starLayer");
+  const connections = $("#connectionLayer");
+
   let state = loadState();
-  let toastTimeout = null;
+  let scene = null;
+  let stack = [];
+  let transitionTimer = null;
+  let transitionToken = 0;
+  let toastTimer = null;
+  let previousFocus = null;
 
-  function motionReduced() {
-    return systemMotion.matches || state.settings.reduceMotion;
-  }
+  const camera = {
+    x: 0,
+    y: 0,
+    zoom: 1
+  };
 
-  /* ======================================
+  const pointers = new Map();
+
+  let dragDistance = 0;
+  let pinch = null;
+  let suppressClickUntil = 0;
+
+  /* =====================================
      STORAGE
-  ====================================== */
+  ===================================== */
 
-  function initialState() {
+  function createState() {
     const now = new Date().toISOString();
+
     return {
       schemaVersion: CONFIG.schemaVersion,
       createdAt: now,
@@ -39,25 +59,37 @@
     };
   }
 
+  function numberBetween(value, min, max, fallback) {
+    const n = Number(value);
+    return Number.isFinite(n)
+      ? Math.max(min, Math.min(max, n))
+      : fallback;
+  }
+
   function normalizeState(input) {
-    const base = initialState();
-    const archive = input?.archive || {};
+    const base = createState();
     const settings = input?.settings || {};
+    const archive = input?.archive || {};
 
     return {
+      ...base,
+      ...(input || {}),
       schemaVersion: CONFIG.schemaVersion,
-      createdAt: input?.createdAt || base.createdAt,
-      updatedAt: input?.updatedAt || base.updatedAt,
+
       settings: {
-        starDensity: safeNumber(
+        ...base.settings,
+        ...settings,
+        starDensity: numberBetween(
           settings.starDensity, 10, 100, 65
         ),
-        starBrightness: safeNumber(
+        starBrightness: numberBetween(
           settings.starBrightness, 10, 100, 55
         ),
         reduceMotion: settings.reduceMotion === true
       },
+
       archive: {
+        ...archive,
         groups: Array.isArray(archive.groups)
           ? archive.groups : [],
         productions: Array.isArray(archive.productions)
@@ -70,26 +102,21 @@
     };
   }
 
-  function safeNumber(value, min, max, fallback) {
-    const n = Number(value);
-    return Number.isFinite(n)
-      ? Math.min(max, Math.max(min, n))
-      : fallback;
-  }
-
   function loadState() {
     try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return initialState();
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return createState();
 
-      const saved = JSON.parse(raw);
-      if (saved.schemaVersion !== CONFIG.schemaVersion) {
-        throw new Error("Unsupported storage version");
+      const parsed = JSON.parse(raw);
+
+      if (parsed.schemaVersion !== CONFIG.schemaVersion) {
+        throw new Error("Unsupported schema version");
       }
-      return normalizeState(saved);
+
+      return normalizeState(parsed);
     } catch (error) {
-      console.warn("Storage unavailable or incompatible:", error);
-      return initialState();
+      console.error("Could not load archive:", error);
+      return createState();
     }
   }
 
@@ -97,26 +124,1094 @@
     state.updatedAt = new Date().toISOString();
 
     try {
-      localStorage.setItem(storageKey, JSON.stringify(state));
-      setSaveStatus(true);
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(state)
+      );
+      updateSaveStatus(true);
       return true;
     } catch (error) {
-      console.error("Storage error:", error);
-      setSaveStatus(false);
-      toast("Unable to save in this browser.");
+      updateSaveStatus(false);
+      notify("Saving failed.");
+      console.error(error);
       return false;
     }
   }
 
-  function setSaveStatus(success) {
-    $("#saveStatus").classList.toggle("error", !success);
-    $("#saveText").textContent =
-      success ? "Saved locally" : "Save failed";
+  function updateSaveStatus(success) {
+    $("#saveStatus").classList.toggle(
+      "error", !success
+    );
+    $("#saveText").textContent = success
+      ? "Saved locally"
+      : "Save failed";
   }
 
-  /* ======================================
-     BACKUP SYSTEM
-  ====================================== */
+  /* =====================================
+     HELPERS
+  ===================================== */
+
+  function motionReduced() {
+    return (
+      systemMotion.matches ||
+      state.settings.reduceMotion
+    );
+  }
+
+  function updateMotion() {
+    document.body.classList.toggle(
+      "reduce-motion",
+      motionReduced()
+    );
+  }
+
+  function notify(message) {
+    const toast = $("#toast");
+
+    toast.textContent = message;
+    toast.classList.add("show");
+
+    clearTimeout(toastTimer);
+
+    toastTimer = setTimeout(() => {
+      toast.classList.remove("show");
+    }, 3000);
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function uid() {
+    return crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
+  }
+
+  function hashValue(str) {
+    let h = 2166136261;
+
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+
+    return h >>> 0;
+  }
+
+  function escapeHtml(text) {
+    return String(text ?? "").replace(
+      /[&<>"']/g,
+      c => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[c]
+    );
+  }
+
+  /* =====================================
+     CAMERA MATH
+  ===================================== */
+
+  function screenToWorld(sx, sy) {
+    return {
+      x: camera.x +
+        (sx - window.innerWidth / 2) / camera.zoom,
+      y: camera.y +
+        (sy - window.innerHeight / 2) / camera.zoom
+    };
+  }
+
+  function worldToScreen(x, y) {
+    return {
+      x: window.innerWidth / 2 +
+        (x - camera.x) * camera.zoom,
+      y: window.innerHeight / 2 +
+        (y - camera.y) * camera.zoom
+    };
+  }
+
+  function renderCamera() {
+    world.style.transform =
+      `translate3d(${window.innerWidth / 2}px,` +
+      `${window.innerHeight / 2}px,0) ` +
+      `scale(${camera.zoom}) ` +
+      `translate3d(${-camera.x}px,${-camera.y}px,0)`;
+
+    if (sky) sky.offset(camera.x, camera.y);
+  }
+
+  function setCamera(x, y, zoom) {
+    camera.x = x;
+    camera.y = y;
+    camera.zoom = clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+    renderCamera();
+  }
+
+  function zoomAt(screenX, screenY, factor) {
+    const before = screenToWorld(screenX, screenY);
+    const newZoom = clamp(
+      camera.zoom * factor,
+      MIN_ZOOM,
+      MAX_ZOOM
+    );
+
+    camera.zoom = newZoom;
+
+    camera.x = before.x -
+      (screenX - window.innerWidth / 2) / newZoom;
+
+    camera.y = before.y -
+      (screenY - window.innerHeight / 2) / newZoom;
+
+    renderCamera();
+  }
+
+  let cameraAnimation = null;
+
+  function animateCamera(target, duration = 650) {
+    if (cameraAnimation) {
+      cancelAnimationFrame(cameraAnimation);
+      cameraAnimation = null;
+    }
+
+    if (motionReduced() || duration <= 0) {
+      setCamera(target.x, target.y, target.zoom);
+      return Promise.resolve();
+    }
+
+    const start = {...camera};
+    const startTime = performance.now();
+
+    return new Promise(resolve => {
+      function frame(now) {
+        const t = clamp(
+          (now - startTime) / duration, 0, 1
+        );
+
+        const ease = 1 - Math.pow(1 - t, 3);
+
+        setCamera(
+          start.x + (target.x - start.x) * ease,
+          start.y + (target.y - start.y) * ease,
+          start.zoom + (target.zoom - start.zoom) * ease
+        );
+
+        if (t < 1) {
+          cameraAnimation = requestAnimationFrame(frame);
+        } else {
+          cameraAnimation = null;
+          resolve();
+        }
+      }
+
+      cameraAnimation = requestAnimationFrame(frame);
+    });
+  }
+
+  function fitZoom(nodes) {
+    if (!nodes.length) return 1;
+
+    const xs = nodes.map(n => n.x);
+    const ys = nodes.map(n => n.y);
+
+    const width = Math.max(...xs) - Math.min(...xs);
+    const height = Math.max(...ys) - Math.min(...ys);
+
+    const availableWidth = Math.max(
+      180,
+      window.innerWidth - (window.innerWidth < 650 ? 110 : 300)
+    );
+
+    const availableHeight = Math.max(
+      160,
+      window.innerHeight - (window.innerWidth < 650 ? 340 : 320)
+    );
+
+    return clamp(
+      Math.min(
+        availableWidth / Math.max(width + 160, 1),
+        availableHeight / Math.max(height + 170, 1),
+        1.1
+      ),
+      .26,
+      1.1
+    );
+  }
+
+  function sceneCamera(nodes) {
+    if (!nodes.length) {
+      return { x: 0, y: 0, zoom: 1 };
+    }
+
+    return {
+      x: (
+        Math.min(...nodes.map(n => n.x)) +
+        Math.max(...nodes.map(n => n.x))
+      ) / 2,
+      y: (
+        Math.min(...nodes.map(n => n.y)) +
+        Math.max(...nodes.map(n => n.y))
+      ) / 2,
+      zoom: fitZoom(nodes)
+    };
+  }
+
+  /* =====================================
+     PROCEDURAL BACKGROUND
+  ===================================== */
+
+  class SpaceBackground {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext("2d");
+      this.stars = [];
+      this.x = 0;
+      this.y = 0;
+      this.running = false;
+      this.frame = 0;
+      this.lastDraw = 0;
+
+      this.resize();
+    }
+
+    resize() {
+      if (!this.ctx) return;
+
+      this.width = window.innerWidth;
+      this.height = window.innerHeight;
+
+      const dpr = Math.min(
+        window.devicePixelRatio || 1, 1.5
+      );
+
+      this.canvas.width = Math.round(this.width * dpr);
+      this.canvas.height = Math.round(this.height * dpr);
+      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const density = state.settings.starDensity / 100;
+
+      const count = Math.min(
+        1300,
+        Math.max(
+          75,
+          Math.round(this.width * this.height * .00045 * density)
+        )
+      );
+
+      this.stars = [];
+
+      for (let i = 0; i < count; i++) {
+        const large = Math.random() > .96;
+
+        this.stars.push({
+          x: Math.random() * this.width,
+          y: Math.random() * this.height,
+          radius: large
+            ? .9 + Math.random() * .85
+            : .2 + Math.random() * .65,
+          alpha: .17 + Math.random() * .66,
+          depth: .04 + Math.random() * .22,
+          phase: Math.random() * Math.PI * 2,
+          speed: .00015 + Math.random() * .00045,
+          warm: Math.random() < .08
+        });
+      }
+
+      this.draw(performance.now());
+    }
+
+    offset(x, y) {
+      this.x = x;
+      this.y = y;
+
+      if (motionReduced()) {
+        this.draw(performance.now());
+      }
+    }
+
+    draw(time) {
+      if (!this.ctx) return;
+
+      const ctx = this.ctx;
+      ctx.clearRect(0, 0, this.width, this.height);
+
+      const brightness =
+        state.settings.starBrightness / 100;
+
+      const reduced = motionReduced();
+
+      for (const star of this.stars) {
+        const sx = reduced ? star.x :
+          ((star.x - this.x * star.depth) %
+          this.width + this.width) % this.width;
+
+        const sy = reduced ? star.y :
+          ((star.y - this.y * star.depth) %
+          this.height + this.height) % this.height;
+
+        const twinkle = reduced ? 1 :
+          .82 + Math.sin(
+            time * star.speed + star.phase
+          ) * .18;
+
+        const alpha = clamp(
+          star.alpha * twinkle * (.4 + brightness),
+          0, 1
+        );
+
+        ctx.beginPath();
+        ctx.arc(
+          sx, sy, star.radius,
+          0, Math.PI * 2
+        );
+
+        ctx.fillStyle = star.warm
+          ? `rgba(228,207,224,${alpha})`
+          : `rgba(207,213,245,${alpha})`;
+
+        ctx.fill();
+      }
+    }
+
+    start() {
+      if (this.running || !this.ctx) return;
+
+      this.running = true;
+
+      const loop = t => {
+        if (!this.running) return;
+
+        if (t - this.lastDraw >= 33) {
+          this.draw(t);
+          this.lastDraw = t;
+        }
+
+        this.frame = requestAnimationFrame(loop);
+      };
+
+      this.frame = requestAnimationFrame(loop);
+    }
+
+    stop() {
+      this.running = false;
+      cancelAnimationFrame(this.frame);
+    }
+  }
+
+  let sky = new SpaceBackground(
+    $("#backgroundStars")
+  );
+
+  /* =====================================
+     ARCHIVE RELATIONSHIPS
+  ===================================== */
+
+  function relatedItems(parent) {
+    const archive = state.archive;
+
+    if (parent.type === "group") {
+      return archive.productions.filter(item =>
+        item.groupId === parent.id ||
+        item.parentId === parent.id
+      );
+    }
+
+    if (parent.type === "production") {
+      return archive.seasons.filter(item =>
+        item.productionId === parent.id ||
+        item.parentId === parent.id
+      );
+    }
+
+    if (parent.type === "season") {
+      return archive.episodes.filter(item =>
+        item.seasonId === parent.id ||
+        item.parentId === parent.id
+      );
+    }
+
+    return [];
+  }
+
+  function makeArchiveNode(item, type) {
+    return {
+      id: item.id,
+      name: item.title || item.name || "Untitled",
+      type,
+      data: item,
+      demo: false
+    };
+  }
+
+  function getChildren(parent) {
+    if (parent.demo) {
+      return (parent.children || []).map(item => ({
+        ...item,
+        demo: true
+      }));
+    }
+
+    if (parent.type === "root") {
+      return [];
+    }
+
+    return relatedItems(parent).map(item => {
+      const types = {
+        group: "production",
+        production: "season",
+        season: "episode"
+      };
+
+      return makeArchiveNode(
+        item,
+        types[parent.type]
+      );
+    });
+  }
+
+  /* =====================================
+     CONSTELLATION LAYOUT
+  ===================================== */
+
+  function positionNodes(items) {
+    if (!items.length) return [];
+
+    return items.map((item, index) => {
+      if (
+        Number.isFinite(item.data?.mapX) &&
+        Number.isFinite(item.data?.mapY)
+      ) {
+        return {
+          ...item,
+          x: item.data.mapX,
+          y: item.data.mapY
+        };
+      }
+
+      const count = items.length;
+      const hash = hashValue(item.id || item.name);
+
+      const angle =
+        -Math.PI / 2 +
+        index * (Math.PI * 2 / Math.max(count, 3)) +
+        ((hash % 21) - 10) * .008;
+
+      const radius = count === 1
+        ? 0
+        : count === 2
+          ? 225
+          : 260 + Math.sqrt(count) * 48;
+
+      return {
+        ...item,
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius
+      };
+    });
+  }
+
+  function makeConnections(nodes) {
+    const result = [];
+
+    if (nodes.length < 2) return result;
+
+    // A simple nearest-neighbor constellation,
+    // with an extra link for each star.
+    const used = new Set();
+
+    nodes.forEach((node, i) => {
+      const nearest = nodes
+        .filter(other => other.id !== node.id)
+        .map(other => ({
+          other,
+          distance: Math.hypot(
+            other.x - node.x,
+            other.y - node.y
+          )
+        }))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, nodes.length > 3 ? 2 : 1);
+
+      nearest.forEach(({other}) => {
+        const key = [node.id, other.id]
+          .sort().join("|");
+
+        if (!used.has(key)) {
+          used.add(key);
+          result.push([node.id, other.id]);
+        }
+      });
+    });
+
+    return result;
+  }
+
+  function makeScene(parent) {
+    if (parent.type === "root") {
+      return {
+        parent,
+        title: "Your Universe",
+        eyebrow: "THE OBSERVATORY",
+        subtitle: "Every story leaves a star behind.",
+        nodes: clone(CONFIG.mainNodes),
+        edges: clone(CONFIG.mainConnections)
+      };
+    }
+
+    if (parent.type === "library") {
+      const productions = state.archive.productions
+        .map(p => makeArchiveNode(p, "production"));
+
+      return {
+        parent,
+        title: "Library",
+        eyebrow: "THE COLLECTION",
+        subtitle: "All your stories, wherever they belong.",
+        nodes: positionNodes(productions),
+        edges: null
+      };
+    }
+
+    if (parent.type === "groups") {
+      const groups = state.archive.groups
+        .map(g => makeArchiveNode(g, "group"));
+
+      // A temporary example until Step 3.
+      groups.push({
+        ...CONFIG.demo,
+        demo: true
+      });
+
+      return {
+        parent,
+        title: "Groups",
+        eyebrow: "CONNECTED WORLDS",
+        subtitle: "Each star contains another universe.",
+        nodes: positionNodes(groups),
+        edges: null
+      };
+    }
+
+    const types = {
+      group: "A CONSTELLATION OF STORIES",
+      production: "THE SERIES",
+      season: "THE SEASON",
+      episode: "AN EPISODE"
+    };
+
+    const children = getChildren(parent);
+
+    return {
+      parent,
+      title: parent.name,
+      eyebrow: types[parent.type] || "THE ARCHIVE",
+      subtitle: children.length
+        ? "Look closer. There is more to discover."
+        : "A quiet corner of your universe.",
+      nodes: positionNodes(children),
+      edges: null
+    };
+  }
+
+  function drawScene(next) {
+    scene = next;
+
+    layer.replaceChildren();
+    connections.replaceChildren();
+
+    const ns = "http://www.w3.org/2000/svg";
+
+    const nodeById = new Map(
+      next.nodes.map(node => [node.id, node])
+    );
+
+    const edges = next.edges ||
+      makeConnections(next.nodes);
+
+    edges.forEach(([a, b]) => {
+      const start = nodeById.get(a);
+      const end = nodeById.get(b);
+
+      if (!start || !end) return;
+
+      const line = document.createElementNS(
+        ns, "line"
+      );
+
+      line.setAttribute("x1", start.x);
+      line.setAttribute("y1", start.y);
+      line.setAttribute("x2", end.x);
+      line.setAttribute("y2", end.y);
+
+      line.dataset.from = a;
+      line.dataset.to = b;
+
+      connections.appendChild(line);
+    });
+
+    next.nodes.forEach(node => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className =
+        "celestial-star" +
+        (node.type === "episode" ? " minor" : "") +
+        (node.demo ? " demo" : "");
+
+      button.style.left = `${node.x}px`;
+      button.style.top = `${node.y}px`;
+      button.style.setProperty(
+        "--core-size",
+        `${node.size || 8}px`
+      );
+
+      button.dataset.id = node.id;
+      button.setAttribute(
+        "aria-label",
+        `Explore ${node.name}`
+      );
+
+      const aura = document.createElement("span");
+      aura.className = "star-aura";
+
+      const halo = document.createElement("span");
+      halo.className = "star-halo";
+
+      const core = document.createElement("span");
+      core.className = "star-core";
+
+      const label = document.createElement("span");
+      label.className = "star-label";
+      label.textContent = node.name;
+
+      button.append(aura, halo, core, label);
+
+      button.addEventListener("pointerenter", () => {
+        highlight(node.id);
+      });
+
+      button.addEventListener("pointerleave", () => {
+        highlight(null);
+      });
+
+      button.addEventListener("focus", () => {
+        highlight(node.id);
+      });
+
+      button.addEventListener("blur", () => {
+        highlight(null);
+      });
+
+      button.addEventListener("click", event => {
+        event.stopPropagation();
+
+        if (performance.now() < suppressClickUntil) {
+          return;
+        }
+
+        selectNode(node);
+      });
+
+      layer.appendChild(button);
+    });
+
+    updateSceneHeading();
+    updateBreadcrumbs();
+    updateControls();
+    updateEmptyHint();
+  }
+
+  function highlight(id) {
+    $$(".celestial-star").forEach(button => {
+      button.classList.toggle(
+        "selected",
+        button.dataset.id === id
+      );
+    });
+
+    $$(".connection-layer line").forEach(line => {
+      line.classList.toggle(
+        "lit",
+        id && (
+          line.dataset.from === id ||
+          line.dataset.to === id
+        )
+      );
+    });
+  }
+
+  /* =====================================
+     SCENE NAVIGATION
+  ===================================== */
+
+  function updateSceneHeading() {
+    $("#sceneEyebrow").textContent = scene.eyebrow;
+    $("#sceneTitle").textContent = scene.title;
+    $("#sceneSubtitle").textContent = scene.subtitle;
+  }
+
+  function updateBreadcrumbs() {
+    const nav = $("#breadcrumbs");
+    nav.replaceChildren();
+
+    const parents = [
+      { label: "Universe", depth: -1 },
+      ...stack.map((entry, index) => ({
+        label: entry.scene.parent.type === "root"
+          ? "Universe"
+          : entry.scene.title,
+        depth: index
+      }))
+    ];
+
+    const unique = parents.filter(
+      (entry, index) =>
+        !(index === 1 && entry.label === "Universe")
+    );
+
+    unique.forEach(entry => {
+      const button = document.createElement("button");
+      button.className = "crumb";
+      button.textContent = entry.label;
+      button.type = "button";
+
+      button.addEventListener("click", () => {
+        if (entry.depth < 0) goHome();
+        else returnToDepth(entry.depth);
+      });
+
+      nav.appendChild(button);
+
+      const slash = document.createElement("span");
+      slash.className = "crumb-divider";
+      slash.textContent = "/";
+
+      nav.appendChild(slash);
+    });
+
+    const current = document.createElement("span");
+    current.className = "crumb current";
+    current.textContent = scene.title;
+
+    nav.appendChild(current);
+  }
+
+  function updateControls() {
+    $("#backButton").disabled = stack.length === 0;
+  }
+
+  function updateEmptyHint() {
+    const hint = $("#interactionHint");
+
+    if (scene.nodes.length === 0) {
+      hint.textContent =
+        "THIS CONSTELLATION IS EMPTY — ENTRIES ARRIVE IN STEP 3";
+    } else {
+      hint.innerHTML =
+        "<span>DRAG TO EXPLORE</span>" +
+        "<span class='hint-divider'>·</span>" +
+        "<span>PINCH TO ZOOM</span>" +
+        "<span class='hint-divider'>·</span>" +
+        "<span>TAP A STAR</span>";
+    }
+  }
+
+  function enterScene(parent, focusNode = null) {
+    const next = makeScene(parent);
+
+    stack.push({
+      scene,
+      camera: {...camera}
+    });
+
+    const target = sceneCamera(next.nodes);
+    const token = ++transitionToken;
+
+    clearTimeout(transitionTimer);
+
+    function finish() {
+      if (token !== transitionToken) return;
+
+      drawScene(next);
+      setCamera(
+        target.x, target.y, target.zoom
+      );
+    }
+
+    if (focusNode && !motionReduced()) {
+      animateCamera({
+        x: focusNode.x,
+        y: focusNode.y,
+        zoom: Math.min(
+          MAX_ZOOM, camera.zoom * 1.7
+        )
+      }, 350);
+
+      transitionTimer = setTimeout(finish, 370);
+    } else {
+      finish();
+    }
+  }
+
+  function goBack() {
+    if (!stack.length) return;
+
+    ++transitionToken;
+    clearTimeout(transitionTimer);
+
+    const previous = stack.pop();
+    drawScene(previous.scene);
+
+    animateCamera(previous.camera, 550);
+  }
+
+  function returnToDepth(depth) {
+    if (depth < 0) {
+      goHome();
+      return;
+    }
+
+    if (depth >= stack.length) return;
+
+    const chosen = stack[depth];
+    stack = stack.slice(0, depth);
+
+    ++transitionToken;
+    clearTimeout(transitionTimer);
+
+    drawScene(chosen.scene);
+    animateCamera(chosen.camera, 550);
+  }
+
+  function goHome() {
+    ++transitionToken;
+    clearTimeout(transitionTimer);
+    stack = [];
+
+    const home = makeScene({
+      id: "root",
+      name: "Universe",
+      type: "root"
+    });
+
+    drawScene(home);
+    animateCamera(
+      sceneCamera(home.nodes),
+      650
+    );
+  }
+
+  function selectNode(node) {
+    if (node.type === "navigation") {
+      if (node.id === "settings") {
+        openSettings();
+        return;
+      }
+
+      if (node.id === "rankings" ||
+          node.id === "history") {
+        openInformation(node.id);
+        return;
+      }
+
+      enterScene({
+        id: node.id,
+        name: node.name,
+        type: node.id
+      }, node);
+
+      return;
+    }
+
+    if (node.type === "episode") {
+      openEntry(node);
+      return;
+    }
+
+    enterScene(node, node);
+  }
+
+  /* =====================================
+     DETAIL OVERLAY
+  ===================================== */
+
+  const overlay = $("#detailOverlay");
+  const detailContent = $("#detailContent");
+
+  let previousFocusElement = null;
+
+  function openOverlay(html) {
+    previousFocusElement = document.activeElement;
+
+    detailContent.innerHTML = html;
+    overlay.classList.add("open");
+    overlay.setAttribute("aria-hidden", "false");
+    $("#closeDetailButton").focus();
+
+    $("#viewport").inert = true;
+  }
+
+  function closeOverlay() {
+    overlay.classList.remove("open");
+    overlay.setAttribute("aria-hidden", "true");
+    $("#viewport").inert = false;
+
+    if (previousFocusElement?.isConnected) {
+      previousFocusElement.focus();
+    } else {
+      $("#viewport").focus();
+    }
+  }
+
+  function openInformation(type) {
+    const info = type === "rankings"
+      ? {
+          title: "Rankings",
+          eyebrow: "THE STORIES THAT STAYED",
+          body: "Your ratings, favorite productions, " +
+            "and personal statistics will appear here " +
+            "as the archive develops."
+        }
+      : {
+          title: "History",
+          eyebrow: "THROUGH TIME",
+          body: "Your watching history, rewatches, " +
+            "and personal timeline will eventually " +
+            "live here."
+        };
+
+    openOverlay(`
+      <span class="detail-eyebrow">${info.eyebrow}</span>
+      <h2 id="detailTitle">${info.title}</h2>
+      <p>${info.body}</p>
+    `);
+  }
+
+  function openEntry(node) {
+    const data = node.data || {};
+    const title = escapeHtml(node.name);
+
+    const notes = data.notes ||
+      data.observations ||
+      "This entry will have its own detailed page in Step 5.";
+
+    openOverlay(`
+      <span class="detail-eyebrow">EPISODE</span>
+      <h2 id="detailTitle">${title}</h2>
+      <p>${escapeHtml(notes)}</p>
+    `);
+  }
+
+  function openSettings() {
+    openOverlay(`
+      <span class="detail-eyebrow">THE OBSERVATORY</span>
+      <h2 id="detailTitle">Settings</h2>
+      <p>
+        Adjust the atmosphere of your personal universe.
+      </p>
+
+      <h3>Atmosphere</h3>
+
+      <div class="detail-field setting-field">
+        <label for="starDensity">Star density</label>
+        <div>
+          <input
+            id="starDensity"
+            class="setting-range"
+            type="range"
+            min="10"
+            max="100"
+            step="5"
+            value="${state.settings.starDensity}"
+          >
+          <output id="densityValue">
+            ${state.settings.starDensity}
+          </output>
+        </div>
+      </div>
+
+      <div class="detail-field setting-field">
+        <label for="starBrightness">Star brightness</label>
+        <div>
+          <input
+            id="starBrightness"
+            class="setting-range"
+            type="range"
+            min="10"
+            max="100"
+            step="5"
+            value="${state.settings.starBrightness}"
+          >
+          <output id="brightnessValue">
+            ${state.settings.starBrightness}
+          </output>
+        </div>
+      </div>
+
+      <div class="detail-field setting-field">
+        <label for="reduceMotion">Reduce motion</label>
+        <input
+          id="reduceMotion"
+          class="motion-toggle"
+          type="checkbox"
+          ${state.settings.reduceMotion ? "checked" : ""}
+        >
+      </div>
+
+      <h3>Archive & Storage</h3>
+
+      <p>
+        Your personal records are stored locally in
+        this browser. Export backups regularly.
+      </p>
+
+      <button class="detail-action"
+        type="button" id="exportButton">
+        Export backup ↗
+      </button>
+
+      <button class="detail-action"
+        type="button" id="importButton">
+        Import backup ↙
+      </button>
+    `);
+
+    $("#starDensity").addEventListener("input", e => {
+      state.settings.starDensity = Number(e.target.value);
+      $("#densityValue").textContent = e.target.value;
+      sky.resize();
+      saveState();
+    });
+
+    $("#starBrightness").addEventListener("input", e => {
+      state.settings.starBrightness = Number(e.target.value);
+      $("#brightnessValue").textContent = e.target.value;
+      sky.draw(performance.now());
+      saveState();
+    });
+
+    $("#reduceMotion").addEventListener("change", e => {
+      state.settings.reduceMotion = e.target.checked;
+      updateMotion();
+      sky.draw(performance.now());
+      saveState();
+    });
+
+    $("#exportButton").addEventListener(
+      "click", exportBackup
+    );
+
+    $("#importButton").addEventListener(
+      "click", () => $("#importFile").click()
+    );
+  }
+
+  /* =====================================
+     BACKUP IMPORT / EXPORT
+  ===================================== */
 
   function exportBackup() {
     const backup = {
@@ -128,23 +1223,23 @@
 
     const blob = new Blob(
       [JSON.stringify(backup, null, 2)],
-      { type: "application/json" }
+      {type: "application/json"}
     );
-    const url = URL.createObjectURL(blob);
 
-    const link = document.createElement("a");
-    link.href = url;
-    link.download =
-      "watch-archive-" +
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+
+    a.href = url;
+    a.download = "watch-archive-" +
       new Date().toISOString().slice(0, 10) +
       ".json";
 
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
 
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast("Backup prepared.");
+    notify("Backup prepared.");
   }
 
   async function importBackup(file) {
@@ -159,441 +1254,270 @@
         backup.schemaVersion !== CONFIG.schemaVersion ||
         !backup.data ||
         !backup.data.archive ||
-        !["groups", "productions", "seasons", "episodes"]
+        !["groups","productions","seasons","episodes"]
           .every(k => Array.isArray(backup.data.archive[k]))
       ) {
-        throw new Error("Invalid archive backup");
+        throw new Error("Invalid backup");
       }
 
-      const proceed = confirm(
-        "Replace the current local archive with this backup?\n\n" +
-        "Export your current archive first if you want to keep it."
-      );
+      if (!confirm(
+        "Replace your current archive with this backup?\n" +
+        "Export the current archive first if needed."
+      )) return;
 
-      if (!proceed) return;
-
-      const previousState = state;
+      const oldState = state;
       state = normalizeState(backup.data);
 
       if (!saveState()) {
-        state = previousState;
+        state = oldState;
         return;
       }
 
-      populateSettings();
       updateMotion();
-      sky.rebuild();
-      toast("Archive restored.");
+      sky.resize();
+      closeOverlay();
+      goHome();
 
+      notify("Archive imported successfully.");
     } catch (error) {
       console.error(error);
-      toast("Invalid or incompatible backup file.");
+      notify("Backup import failed.");
     } finally {
       $("#importFile").value = "";
     }
   }
 
-  /* ======================================
-     STARFIELD
-  ====================================== */
+  /* =====================================
+     POINTER INTERACTION
+  ===================================== */
 
-  class CosmicSky {
-    constructor(canvas) {
-      this.canvas = canvas;
-      this.ctx = canvas.getContext("2d");
-      this.stars = [];
-      this.width = 0;
-      this.height = 0;
-      this.frame = null;
-      this.lastFrame = 0;
-      this.running = false;
-      this.scrollY = 0;
-      this.rebuild();
-    }
-
-    rebuild() {
-      if (!this.ctx) return;
-
-      this.width = window.innerWidth;
-      this.height = window.innerHeight;
-
-      const dpr = Math.min(
-        window.devicePixelRatio || 1, 1.5
-      );
-
-      this.canvas.width = Math.round(this.width * dpr);
-      this.canvas.height = Math.round(this.height * dpr);
-      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      const area = this.width * this.height;
-      const density = state.settings.starDensity / 100;
-
-      const count = Math.min(
-        1600,
-        Math.max(70, Math.round(area * .00052 * density))
-      );
-
-      this.stars = [];
-
-      for (let i = 0; i < count; i++) {
-        const r = Math.random();
-        let radius;
-
-        if (r < .78) {
-          radius = .25 + Math.random() * .48;
-        } else if (r < .975) {
-          radius = .7 + Math.random() * .55;
-        } else {
-          radius = 1.15 + Math.random() * .85;
-        }
-
-        this.stars.push({
-          x: Math.random() * this.width,
-          y: Math.random() * this.height,
-          radius,
-          alpha: .16 + Math.random() * .66,
-          phase: Math.random() * Math.PI * 2,
-          speed: .00018 + Math.random() * .00055,
-          depth: .15 + Math.random() * .85,
-          warm: Math.random() < .08
-        });
-      }
-
-      this.draw(performance.now());
-    }
-
-    draw(time) {
-      if (!this.ctx) return;
-      const ctx = this.ctx;
-      ctx.clearRect(0, 0, this.width, this.height);
-
-      const bright = state.settings.starBrightness / 100;
-      const reduced = motionReduced();
-
-      for (const star of this.stars) {
-        const twinkle = reduced
-          ? 1
-          : .82 + Math.sin(
-              time * star.speed + star.phase
-            ) * .18;
-
-        const opacity = Math.min(
-          1,
-          star.alpha * twinkle * (.45 + bright * 1.1)
-        );
-
-        const shift = reduced ? 0 :
-          this.scrollY * star.depth * .025;
-
-        const y = (
-          (star.y - shift) % this.height +
-          this.height
-        ) % this.height;
-
-        ctx.beginPath();
-        ctx.arc(star.x, y, star.radius, 0, Math.PI * 2);
-
-        ctx.fillStyle = star.warm
-          ? `rgba(232,207,216,${opacity})`
-          : `rgba(209,218,245,${opacity})`;
-        ctx.fill();
-
-        if (star.radius > 1.4 && opacity > .35) {
-          const glow = ctx.createRadialGradient(
-            star.x, y, 0,
-            star.x, y, star.radius * 7
-          );
-          glow.addColorStop(
-            0, `rgba(185,187,255,${opacity * .15})`
-          );
-          glow.addColorStop(1, "rgba(185,187,255,0)");
-
-          ctx.fillStyle = glow;
-          ctx.beginPath();
-          ctx.arc(
-            star.x, y, star.radius * 7,
-            0, Math.PI * 2
-          );
-          ctx.fill();
-        }
-      }
-    }
-
-    start() {
-      if (this.running || !this.ctx) return;
-      this.running = true;
-
-      const loop = time => {
-        if (!this.running) return;
-
-        if (time - this.lastFrame >= 33) {
-          this.draw(time);
-          this.lastFrame = time;
-        }
-
-        this.frame = requestAnimationFrame(loop);
-      };
-
-      this.frame = requestAnimationFrame(loop);
-    }
-
-    stop() {
-      this.running = false;
-      if (this.frame != null) {
-        cancelAnimationFrame(this.frame);
-        this.frame = null;
-      }
-    }
+  function pointerPosition(event) {
+    return {x: event.clientX, y: event.clientY};
   }
 
-  const sky = new CosmicSky($("#stars"));
-
-  /* ======================================
-     CONSTELLATION
-  ====================================== */
-
-  function updateConstellationGeometry() {
-    // The lines must always connect to the
-    // precise center of their corresponding stars.
-    const points = {};
-
-    $$(".celestial-node").forEach(node => {
-      const id = node.dataset.node;
-      const left = parseFloat(getComputedStyle(node).left);
-      const top = parseFloat(getComputedStyle(node).top);
-      const constellation = $("#constellation");
-
-      points[id] = {
-        x: (left / constellation.clientWidth) * 100,
-        y: (top / constellation.clientHeight) * 100
-      };
-    });
-
-    $$(".constellation-lines line").forEach(line => {
-      const [a, b] = line.dataset.link.split("-");
-      if (!points[a] || !points[b]) return;
-
-      line.setAttribute("x1", points[a].x);
-      line.setAttribute("y1", points[a].y);
-      line.setAttribute("x2", points[b].x);
-      line.setAttribute("y2", points[b].y);
-    });
+  function distance(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
-  function highlightNode(name) {
-    $$(".celestial-node").forEach(node => {
-      node.classList.toggle(
-        "active",
-        node.dataset.node === name
-      );
-    });
-
-    $$(".constellation-lines line").forEach(line => {
-      line.classList.toggle(
-        "illuminated",
-        name && line.dataset.link.split("-").includes(name)
-      );
-    });
+  function middle(a, b) {
+    return {
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2
+    };
   }
 
-  function bindConstellation() {
-    $$(".celestial-node").forEach(node => {
-      node.addEventListener("pointerenter", () => {
-        highlightNode(node.dataset.node);
-      });
+  function beginPinch() {
+    if (pointers.size < 2) return;
 
-      node.addEventListener("pointerleave", () => {
-        highlightNode("");
-      });
+    const [a, b] = [...pointers.values()];
+    const center = middle(a, b);
 
-      node.addEventListener("focus", () => {
-        highlightNode(node.dataset.node);
-      });
-
-      node.addEventListener("blur", () => {
-        highlightNode("");
-      });
-    });
-
-    updateConstellationGeometry();
-  }
-
-  /* ======================================
-     SECTION NAVIGATION
-  ====================================== */
-
-  function scrollToTarget(id, updateUrl = true) {
-    const target = document.getElementById(id);
-    if (!target) return;
-
-    if (updateUrl) {
-      history.pushState(null, "", `#${id}`);
-    }
-
-    target.scrollIntoView({
-      behavior: motionReduced() ? "instant" : "smooth",
-      block: "start"
-    });
-  }
-
-  function bindNavigation() {
-    $$('a[href^="#"]').forEach(link => {
-      link.addEventListener("click", event => {
-        const id = link.getAttribute("href").slice(1);
-        if (!document.getElementById(id)) return;
-
-        event.preventDefault();
-        scrollToTarget(id);
-      });
-    });
-
-    window.addEventListener("popstate", () => {
-      const id = location.hash.slice(1) || "home";
-      scrollToTarget(id, false);
-    });
-
-    if (location.hash) {
-      requestAnimationFrame(() => {
-        scrollToTarget(location.hash.slice(1), false);
-      });
-    }
-  }
-
-  /* ======================================
-     SCROLL & REVEALS
-  ====================================== */
-
-  function bindScroll() {
-    const returnStar = $("#returnStar");
-
-    const onScroll = () => {
-      sky.scrollY = window.scrollY;
-
-      returnStar.classList.toggle(
-        "visible",
-        window.scrollY > window.innerHeight * .55
-      );
+    pinch = {
+      distance: Math.max(1, distance(a, b)),
+      zoom: camera.zoom,
+      worldPoint: screenToWorld(center.x, center.y)
     };
 
-    window.addEventListener(
-      "scroll", onScroll, { passive: true }
-    );
+    suppressClickUntil = performance.now() + 400;
+  }
 
-    onScroll();
+  function bindPointerControls() {
+    viewport.addEventListener("pointerdown", e => {
+      if (e.button !== 0 && e.pointerType === "mouse") {
+        return;
+      }
 
-    if (!("IntersectionObserver" in window)) {
-      $$(".reveal").forEach(el =>
-        el.classList.add("visible")
+      if (cameraAnimation) {
+        cancelAnimationFrame(cameraAnimation);
+        cameraAnimation = null;
+      }
+
+      viewport.setPointerCapture(e.pointerId);
+      pointers.set(
+        e.pointerId,
+        pointerPosition(e)
       );
-      return;
+
+      if (pointers.size === 1) {
+        dragDistance = 0;
+      } else if (pointers.size === 2) {
+        beginPinch();
+      }
+    });
+
+    viewport.addEventListener("pointermove", e => {
+      if (!pointers.has(e.pointerId)) return;
+
+      const old = pointers.get(e.pointerId);
+      const next = pointerPosition(e);
+
+      pointers.set(e.pointerId, next);
+
+      if (pointers.size >= 2) {
+        const [a, b] = [...pointers.values()];
+        if (!pinch) beginPinch();
+
+        const center = middle(a, b);
+        const d = Math.max(1, distance(a, b));
+
+        camera.zoom = clamp(
+          pinch.zoom * d / pinch.distance,
+          MIN_ZOOM,
+          MAX_ZOOM
+        );
+
+        camera.x = pinch.worldPoint.x -
+          (center.x - innerWidth / 2) / camera.zoom;
+
+        camera.y = pinch.worldPoint.y -
+          (center.y - innerHeight / 2) / camera.zoom;
+
+        renderCamera();
+        dragDistance = TAP_THRESHOLD + 1;
+        suppressClickUntil = performance.now() + 400;
+        return;
+      }
+
+      const dx = next.x - old.x;
+      const dy = next.y - old.y;
+
+      dragDistance += Math.hypot(dx, dy);
+
+      camera.x -= dx / camera.zoom;
+      camera.y -= dy / camera.zoom;
+
+      renderCamera();
+
+      if (dragDistance > TAP_THRESHOLD) {
+        viewport.classList.add("dragging");
+        suppressClickUntil = performance.now() + 350;
+      }
+    });
+
+    function pointerEnd(e) {
+      if (!pointers.has(e.pointerId)) return;
+
+      pointers.delete(e.pointerId);
+
+      if (viewport.hasPointerCapture(e.pointerId)) {
+        viewport.releasePointerCapture(e.pointerId);
+      }
+
+      viewport.classList.remove("dragging");
+
+      if (pointers.size < 2) {
+        pinch = null;
+      }
+
+      if (pointers.size === 1) {
+        const remaining = [...pointers.values()][0];
+        pinch = null;
+        dragDistance = 0;
+      }
     }
 
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("visible");
-            observer.unobserve(entry.target);
-          }
-        });
-      },
-      { threshold: .08 }
-    );
+    viewport.addEventListener("pointerup", pointerEnd);
+    viewport.addEventListener("pointercancel", pointerEnd);
 
-    $$(".reveal").forEach(el => observer.observe(el));
-  }
+    viewport.addEventListener("wheel", e => {
+      e.preventDefault();
 
-  /* ======================================
-     SETTINGS
-  ====================================== */
+      const factor = Math.exp(-e.deltaY * .0011);
+      zoomAt(e.clientX, e.clientY, factor);
+    }, {passive: false});
 
-  function populateSettings() {
-    $("#density").value = state.settings.starDensity;
-    $("#brightness").value = state.settings.starBrightness;
-    $("#motion").checked = state.settings.reduceMotion;
-
-    $("#densityValue").textContent =
-      state.settings.starDensity;
-    $("#brightnessValue").textContent =
-      state.settings.starBrightness;
-  }
-
-  function updateMotion() {
-    document.body.classList.toggle(
-      "reduce-motion",
-      motionReduced()
-    );
-    sky.draw(performance.now());
-  }
-
-  function bindSettings() {
-    populateSettings();
-
-    $("#density").addEventListener("input", e => {
-      const value = Number(e.target.value);
-      state.settings.starDensity = value;
-      $("#densityValue").textContent = value;
-
-      sky.rebuild();
-      saveState();
+    viewport.addEventListener("click", e => {
+      if (e.target === viewport &&
+          performance.now() < suppressClickUntil) {
+        e.preventDefault();
+      }
     });
 
-    $("#brightness").addEventListener("input", e => {
-      const value = Number(e.target.value);
-      state.settings.starBrightness = value;
-      $("#brightnessValue").textContent = value;
+    viewport.addEventListener("keydown", e => {
+      if (e.target !== viewport) return;
 
-      sky.draw(performance.now());
-      saveState();
+      const step = 80 / camera.zoom;
+
+      if (e.key === "ArrowUp") camera.y -= step;
+      else if (e.key === "ArrowDown") camera.y += step;
+      else if (e.key === "ArrowLeft") camera.x -= step;
+      else if (e.key === "ArrowRight") camera.x += step;
+      else if (e.key === "+" || e.key === "=") {
+        zoomAt(innerWidth / 2, innerHeight / 2, 1.2);
+      } else if (e.key === "-") {
+        zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.2);
+      } else return;
+
+      e.preventDefault();
+      renderCamera();
     });
+  }
 
-    $("#motion").addEventListener("change", e => {
-      state.settings.reduceMotion = e.target.checked;
-      updateMotion();
-      saveState();
-    });
+  /* =====================================
+     BUTTONS & GLOBAL EVENTS
+  ===================================== */
 
-    $("#exportButton").addEventListener(
-      "click", exportBackup
+  function bindControls() {
+    $("#brandButton").addEventListener(
+      "click", goHome
     );
 
-    $("#importButton").addEventListener(
-      "click", () => $("#importFile").click()
+    $("#homeButton").addEventListener(
+      "click", goHome
     );
+
+    $("#backButton").addEventListener(
+      "click", goBack
+    );
+
+    $("#zoomInButton").addEventListener(
+      "click", () => {
+        zoomAt(innerWidth / 2, innerHeight / 2, 1.3);
+      }
+    );
+
+    $("#zoomOutButton").addEventListener(
+      "click", () => {
+        zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.3);
+      }
+    );
+
+    $("#focusButton").addEventListener(
+      "click", () => {
+        animateCamera(
+          sceneCamera(scene.nodes), 650
+        );
+      }
+    );
+
+    $("#closeDetailButton").addEventListener(
+      "click", closeOverlay
+    );
+
+    $("#detailBackdrop").addEventListener(
+      "click", closeOverlay
+    );
+
+    window.addEventListener("keydown", e => {
+      if (e.key === "Escape" &&
+          overlay.classList.contains("open")) {
+        closeOverlay();
+      }
+    });
 
     $("#importFile").addEventListener("change", e => {
       importBackup(e.target.files?.[0]);
     });
-  }
 
-  /* ======================================
-     NOTIFICATIONS
-  ====================================== */
-
-  function toast(message) {
-    const el = $("#toast");
-    el.textContent = message;
-    el.classList.add("show");
-
-    clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => {
-      el.classList.remove("show");
-    }, 3000);
-  }
-
-  /* ======================================
-     GLOBAL EVENTS
-  ====================================== */
-
-  function bindGlobalEvents() {
     let resizeTimer;
 
     window.addEventListener("resize", () => {
       clearTimeout(resizeTimer);
+
       resizeTimer = setTimeout(() => {
-        sky.rebuild();
-        updateConstellationGeometry();
-      }, 150);
+        sky.resize();
+        renderCamera();
+      }, 130);
     });
 
     document.addEventListener(
@@ -608,34 +1532,49 @@
     );
 
     window.addEventListener("storage", e => {
-      if (e.key !== storageKey) return;
+      if (e.key !== STORAGE_KEY) return;
+
       state = loadState();
-      populateSettings();
       updateMotion();
-      sky.rebuild();
-      toast("Archive updated from another tab.");
+      sky.resize();
+      goHome();
+      notify("Archive updated from another tab.");
     });
   }
 
-  /* ======================================
-     INITIALIZATION
-  ====================================== */
+  /* =====================================
+     START THE UNIVERSE
+  ===================================== */
 
   function initialize() {
-    bindConstellation();
-    bindNavigation();
-    bindScroll();
-    bindSettings();
-    bindGlobalEvents();
     updateMotion();
+    bindPointerControls();
+    bindControls();
+
+    const root = {
+      id: "root",
+      name: "Universe",
+      type: "root"
+    };
+
+    const home = makeScene(root);
+    drawScene(home);
+
+    const start = sceneCamera(home.nodes);
+
+    setCamera(
+      start.x,
+      start.y,
+      start.zoom
+    );
+
     sky.start();
 
-    // Save the initial structure if no data exists.
-    // Existing Step 1 preferences and records remain.
-    if (!localStorage.getItem(storageKey)) {
+    if (!localStorage.getItem(STORAGE_KEY)) {
       saveState();
     }
   }
 
   initialize();
+
 })();
