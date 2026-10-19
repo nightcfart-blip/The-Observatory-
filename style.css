@@ -1,29 +1,39 @@
+
+/* =========================================================
+   WATCH ARCHIVE — STEP 4.3
+
+   TRUE TRANSLUCENT BANNER FADE
+   FLOATING CELESTIAL POPUP
+   FIXED MOBILE CHILD LAYOUT
+   NO FULL POPUP SCROLLING
+========================================================= */
+
 :root {
   color-scheme: dark;
 
   --void: #02040b;
-  --void-2: #060919;
   --text: #f1eefc;
-  --muted: #b3aecb;
-  --faint: #777292;
+  --muted: #b6b1cc;
+  --faint: #817b9b;
   --accent: #cbc2f1;
-  --soft-line: rgba(220, 219, 255, 0.08);
 
-  --glass-1: rgba(17, 19, 39, 0.58);
-  --glass-2: rgba(34, 37, 70, 0.18);
-  --glass-3: rgba(94, 88, 153, 0.08);
+  --soft-line: rgba(219, 215, 255, .075);
 
   --serif: "Cormorant Garamond", Georgia, serif;
   --sans: "Inter", Arial, sans-serif;
 
   --ease: cubic-bezier(.22, 1, .36, 1);
+
+  --popup-background: rgba(9, 11, 27, .70);
 }
 
 /* =========================================================
-   BASE
+   RESET
 ========================================================= */
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 html {
   width: 100%;
@@ -40,8 +50,10 @@ body {
   height: 100dvh;
   margin: 0;
   overflow: hidden;
+
   background: var(--void);
   color: var(--text);
+
   font: 300 14px/1.6 var(--sans);
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
@@ -59,18 +71,22 @@ button {
 }
 
 button:disabled {
-  opacity: 0.45;
+  opacity: .45;
   cursor: not-allowed;
 }
 
 :focus-visible {
-  outline: 2px solid rgba(207, 198, 255, 0.7);
+  outline: 2px solid rgba(207, 198, 255, .65);
   outline-offset: 3px;
 }
 
 ::selection {
-  background: rgba(107, 98, 168, 0.45);
+  background: rgba(107, 98, 168, .45);
   color: #fff;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 .visually-hidden {
@@ -83,7 +99,7 @@ button:disabled {
 }
 
 /* =========================================================
-   SPACE BACKGROUND
+   UNIVERSE BACKGROUND
 ========================================================= */
 
 .universe {
@@ -98,48 +114,82 @@ button:disabled {
 .space-base {
   position: absolute;
   inset: 0;
+
   background:
-    radial-gradient(ellipse 80% 70% at 50% 42%, rgba(18, 33, 81, 0.35), transparent 80%),
-    radial-gradient(ellipse 52% 40% at 20% 78%, rgba(38, 20, 80, 0.14), transparent 80%),
-    radial-gradient(ellipse 46% 34% at 83% 18%, rgba(15, 39, 104, 0.15), transparent 80%),
-    linear-gradient(180deg, #04060f 0%, #02040b 100%);
+    radial-gradient(
+      ellipse 85% 75% at 50% 42%,
+      rgba(18, 33, 81, .34),
+      transparent 80%
+    ),
+    radial-gradient(
+      ellipse 55% 45% at 20% 78%,
+      rgba(38, 20, 80, .17),
+      transparent 82%
+    ),
+    radial-gradient(
+      ellipse 48% 38% at 83% 18%,
+      rgba(15, 39, 104, .18),
+      transparent 80%
+    ),
+    linear-gradient(
+      180deg,
+      #04060f,
+      #02040b
+    );
 }
 
 #nebulaCanvas,
 #backgroundStars {
   position: absolute;
   inset: 0;
+
+  display: block;
   width: 100%;
   height: 100%;
-  display: block;
 }
 
-#nebulaCanvas { opacity: 0.8; }
+#nebulaCanvas {
+  opacity: .82;
+}
 
 .space-vignette {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(ellipse at 50% 48%, transparent 12%, rgba(0, 0, 6, 0.18) 60%, rgba(0, 0, 6, 0.48) 100%);
+
+  background: radial-gradient(
+    ellipse at 50% 48%,
+    transparent 12%,
+    rgba(0, 0, 6, .16) 60%,
+    rgba(0, 0, 6, .46) 100%
+  );
 }
 
 /* =========================================================
-   MAIN VIEWPORT
+   MOVABLE CONSTELLATION WORLD
 ========================================================= */
 
 .viewport {
   position: fixed;
   inset: 0;
   z-index: 2;
+
   overflow: hidden;
   touch-action: none;
+  overscroll-behavior: none;
+
   user-select: none;
   -webkit-user-select: none;
+
   cursor: grab;
 }
 
-.viewport.dragging { cursor: grabbing; }
-.viewport:focus { outline: none; }
+.viewport.dragging {
+  cursor: grabbing;
+}
+
+.viewport:focus {
+  outline: none;
+}
 
 .constellation-canvas,
 .star-layer {
@@ -150,8 +200,8 @@ button:disabled {
 }
 
 .constellation-canvas {
-  pointer-events: none;
   display: block;
+  pointer-events: none;
 }
 
 .star-layer {
@@ -160,21 +210,25 @@ button:disabled {
 }
 
 /* =========================================================
-   INTERACTIVE CONSTELLATION STARS
+   CONSTELLATION STARS
 ========================================================= */
 
 .celestial-star {
   position: absolute;
   left: 0;
   top: 0;
+
   width: var(--hit-width, 136px);
   height: var(--hit-height, 98px);
+
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
+
   transform: translate(-50%, -42%);
   opacity: var(--visibility, 1);
+
   pointer-events: auto;
   touch-action: none;
 }
@@ -188,8 +242,10 @@ button:disabled {
   position: absolute;
   top: 42%;
   left: 50%;
+
   width: 66px;
   height: 66px;
+
   transform: translate(-50%, -50%);
   border-radius: 50%;
 }
@@ -197,19 +253,28 @@ button:disabled {
 .star-label {
   position: absolute;
   left: 50%;
-  top: calc(42% + var(--label-distance, 28px));
+
+  top: calc(
+    42% + var(--label-distance, 28px)
+  );
+
   transform: translateX(-50%);
+
   width: max-content;
   max-width: 200px;
+
   color: var(--label-color, #dddaf0);
+
   font-size: var(--label-size, 12px);
   font-weight: 300;
-  letter-spacing: var(--label-spacing, 0.11em);
-  text-align: center;
+  letter-spacing: var(--label-spacing, .11em);
   line-height: 1.45;
+  text-align: center;
+
   text-shadow:
-    0 1px 8px rgba(0, 0, 8, 0.95),
-    0 0 18px rgba(0, 0, 8, 0.9);
+    0 1px 8px rgba(0, 0, 8, .95),
+    0 0 18px rgba(0, 0, 8, .9);
+
   pointer-events: none;
 }
 
@@ -238,7 +303,7 @@ button:disabled {
 .celestial-star.season-star,
 .celestial-star.episode-star {
   --label-size: 9.5px;
-  --label-spacing: 0.05em;
+  --label-spacing: .05em;
 }
 
 .celestial-star:hover .star-label,
@@ -246,19 +311,23 @@ button:disabled {
 .celestial-star:focus-visible .star-label {
   color: #fff;
   text-shadow:
-    0 0 13px rgba(215, 205, 255, 0.8),
-    0 0 22px rgba(0, 0, 8, 0.9);
+    0 0 13px rgba(215, 205, 255, .8),
+    0 0 22px rgba(0, 0, 8, .9);
 }
 
 /* =========================================================
-   MAP CONTROLS
+   UNIVERSE CONTROLS
 ========================================================= */
 
 .universe-controls {
   position: fixed;
   right: 14px;
-  bottom: calc(16px + env(safe-area-inset-bottom));
+  bottom: calc(
+    16px + env(safe-area-inset-bottom)
+  );
+
   z-index: 14;
+
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -267,38 +336,46 @@ button:disabled {
 .minimal-control {
   display: grid;
   place-items: center;
+
   width: 42px;
   height: 42px;
   padding: 0;
+
   border: 0;
-  border-radius: 999px;
-  background: rgba(13, 16, 31, 0.2);
-  color: rgba(220, 216, 245, 0.72);
+  border-radius: 50%;
+
+  background: rgba(13, 16, 31, .2);
+  color: rgba(220, 216, 245, .72);
+
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  transition: background .24s ease, color .24s ease;
+
+  transition:
+    color .24s ease,
+    background .24s ease;
 }
 
 .minimal-control:hover {
-  background: rgba(118, 113, 177, 0.15);
   color: #fff;
+  background: rgba(118, 113, 177, .15);
 }
 
 /* =========================================================
-   STEP 4.2 POPUP
-   - NOT a full page
-   - centered hologram-like panel
-   - only child sections scroll
+   CELESTIAL POPUP BACKDROP
 ========================================================= */
 
 .popup-overlay {
   position: fixed;
   inset: 0;
   z-index: 28;
+
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity .32s ease, visibility .32s ease;
+
+  transition:
+    opacity .34s ease,
+    visibility .34s ease;
 }
 
 .popup-overlay.open {
@@ -310,50 +387,218 @@ button:disabled {
 .popup-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(2, 3, 10, 0.42);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+
+  background: rgba(1, 2, 9, .34);
+
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
+
+/* =========================================================
+   POPUP SHELL
+
+   Crucial change:
+
+   The entire popup has ONE fixed frame.
+
+   The banner is an absolute background layer.
+   The content is positioned independently.
+
+   The child section has reserved height.
+========================================================= */
 
 .archive-popup {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: min(1000px, calc(100vw - 34px));
-  height: min(780px, calc(100dvh - 38px));
-  transform: translate(-50%, -50%) scale(0.98);
-  border: 1px solid rgba(231, 229, 255, 0.06);
-  border-radius: 28px;
-  background:
-    linear-gradient(180deg, rgba(73, 70, 120, 0.05), transparent 20%),
-    linear-gradient(135deg, rgba(22, 24, 47, 0.65), rgba(8, 10, 22, 0.72));
-  box-shadow:
-    0 24px 120px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+
+  width: min(
+    1080px,
+    calc(100vw - 48px)
+  );
+
+  height: min(
+    810px,
+    calc(100dvh - 44px)
+  );
+
+  transform:
+    translate(-50%, -50%) scale(.985);
+
   overflow: hidden;
-  display: grid;
-  grid-template-rows: 300px 1fr;
-  transition: transform .32s var(--ease);
+  isolation: isolate;
+
+  border: 1px solid rgba(
+    230, 227, 255, .055
+  );
+
+  border-radius: 25px;
+
+  background:
+    radial-gradient(
+      ellipse at 54% 24%,
+      rgba(56, 57, 109, .10),
+      transparent 68%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(16, 19, 41, .24) 0%,
+      rgba(12, 15, 37, .47) 42%,
+      rgba(8, 10, 26, .67) 100%
+    );
+
+  box-shadow:
+    0 22px 100px rgba(0, 0, 0, .34),
+    inset 0 1px 0 rgba(
+      255, 255, 255, .035
+    );
+
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+
+  display: block;
+
+  transition:
+    transform .42s var(--ease);
 }
 
 .popup-overlay.open .archive-popup {
-  transform: translate(-50%, -50%) scale(1);
+  transform:
+    translate(-50%, -50%) scale(1);
 }
 
 .archive-popup:focus {
   outline: none;
 }
 
+/* =========================================================
+   TRUE BANNER FADE
+
+   The mask is on the IMAGE itself.
+   It gradually becomes transparent.
+
+   Not simply blackened.
+   Not cut off at the bottom.
+========================================================= */
+
+.popup-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+
+  height: 71%;
+
+  z-index: 0;
+  overflow: visible;
+
+  pointer-events: none;
+}
+
+.popup-banner {
+  position: absolute;
+  inset: 0;
+
+  background-position: center 35%;
+  background-size: cover;
+  background-repeat: no-repeat;
+
+  opacity: .91;
+
+  filter:
+    brightness(.83)
+    saturate(.88);
+
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 1) 26%,
+    rgba(0, 0, 0, .92) 42%,
+    rgba(0, 0, 0, .68) 58%,
+    rgba(0, 0, 0, .34) 77%,
+    rgba(0, 0, 0, .10) 91%,
+    rgba(0, 0, 0, 0) 100%
+  );
+
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 1) 26%,
+    rgba(0, 0, 0, .92) 42%,
+    rgba(0, 0, 0, .68) 58%,
+    rgba(0, 0, 0, .34) 77%,
+    rgba(0, 0, 0, .10) 91%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+.popup-banner.is-empty {
+  background:
+    radial-gradient(
+      ellipse at 50% 18%,
+      rgba(113, 108, 190, .18),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse at 80% 30%,
+      rgba(60, 104, 194, .11),
+      transparent 76%
+    );
+}
+
+/* Subtle color blending, not an opaque curtain. */
+
+.popup-banner-glow {
+  position: absolute;
+  inset: 0;
+
+  background:
+    radial-gradient(
+      ellipse at 50% 30%,
+      rgba(111, 114, 183, .055),
+      transparent 75%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(3, 5, 16, .12),
+      transparent 75%
+    );
+
+  pointer-events: none;
+}
+
+.popup-banner-fade {
+  position: absolute;
+  inset: 0;
+
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent 32%,
+    rgba(6, 8, 23, .035) 49%,
+    rgba(6, 8, 23, .075) 67%,
+    rgba(6, 8, 23, .12) 86%,
+    rgba(6, 8, 23, 0) 100%
+  );
+
+  pointer-events: none;
+}
+
+/* =========================================================
+   FLOATING POPUP CONTROLS
+========================================================= */
+
 .popup-controls {
   position: absolute;
   top: 16px;
-  left: 18px;
-  right: 18px;
-  z-index: 10;
+  left: 19px;
+  right: 19px;
+
+  z-index: 15;
+
   display: flex;
   justify-content: space-between;
+
   pointer-events: none;
 }
 
@@ -365,84 +610,60 @@ button:disabled {
 .popup-icon-button {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+
+  width: 39px;
+  height: 39px;
+
   padding: 0;
-  border: 1px solid rgba(240, 237, 255, 0.07);
-  border-radius: 999px;
-  background: rgba(13, 16, 31, 0.28);
-  color: rgba(244, 242, 255, 0.92);
+
+  border: 1px solid rgba(
+    240, 237, 255, .07
+  );
+
+  border-radius: 50%;
+
+  background: rgba(8, 11, 26, .27);
+  color: rgba(244, 242, 255, .92);
+
   font-size: 24px;
   font-weight: 300;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+
   pointer-events: auto;
-  transition: background .24s ease;
+
+  transition:
+    background .24s ease;
 }
 
 .popup-icon-button:hover {
-  background: rgba(113, 104, 180, 0.18);
-}
-
-.popup-top {
-  position: relative;
-  overflow: hidden;
-}
-
-.popup-banner {
-  position: absolute;
-  inset: 0;
-  background-position: center 35%;
-  background-size: cover;
-  background-repeat: no-repeat;
-  opacity: 0.82;
-  filter: brightness(0.78) saturate(0.82);
-}
-
-.popup-banner.is-empty {
-  background:
-    radial-gradient(ellipse at 50% 18%, rgba(113, 108, 190, 0.18), transparent 70%),
-    radial-gradient(ellipse at 80% 30%, rgba(60, 104, 194, 0.10), transparent 75%);
-}
-
-.popup-banner-glow {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgba(2, 3, 10, 0.10), rgba(2, 3, 10, 0.12)),
-    radial-gradient(ellipse at center, transparent 10%, rgba(2, 3, 10, 0.08) 70%);
-}
-
-.popup-banner-fade {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 70%;
-  background: linear-gradient(
-    180deg,
-    rgba(7, 8, 18, 0) 0%,
-    rgba(7, 8, 18, 0.18) 28%,
-    rgba(7, 8, 18, 0.48) 55%,
-    rgba(7, 8, 18, 0.78) 82%,
-    rgba(7, 8, 18, 0.96) 100%
+  background: rgba(
+    113, 104, 180, .18
   );
 }
 
+/* =========================================================
+   STATUS PAPERCLIP
+========================================================= */
+
 .popup-paperclip {
   position: absolute;
-  left: 28px;
   top: 44px;
-  z-index: 8;
-  width: 58px;
-  height: 128px;
-  transform: rotate(-11deg);
-  pointer-events: none;
-  filter: drop-shadow(4px 9px 6px rgba(0, 0, 0, 0.52));
-}
+  left: 29px;
 
-.popup-paperclip[hidden] {
-  display: none;
+  z-index: 8;
+
+  width: 56px;
+  height: 127px;
+
+  transform: rotate(-11deg);
+
+  filter: drop-shadow(
+    4px 9px 6px rgba(0, 0, 0, .52)
+  );
+
+  pointer-events: none;
 }
 
 .paperclip-svg {
@@ -453,23 +674,29 @@ button:disabled {
 
 .clip-gem {
   fill: #83869a;
-  stroke: rgba(255, 255, 255, 0.28);
-  stroke-width: 0.9;
+  stroke: rgba(255, 255, 255, .28);
+  stroke-width: .9;
 }
 
 .popup-paperclip[data-status="watching"] .clip-gem {
   fill: #416ce4;
-  filter: drop-shadow(0 0 7px rgba(65, 108, 228, 0.8));
+  filter: drop-shadow(
+    0 0 7px rgba(65, 108, 228, .8)
+  );
 }
 
 .popup-paperclip[data-status="finished"] .clip-gem {
   fill: #8b67dd;
-  filter: drop-shadow(0 0 7px rgba(139, 103, 221, 0.85));
+  filter: drop-shadow(
+    0 0 7px rgba(139, 103, 221, .85)
+  );
 }
 
 .popup-paperclip[data-status="discontinued"] .clip-gem {
   fill: #55c3cb;
-  filter: drop-shadow(0 0 7px rgba(85, 195, 203, 0.85));
+  filter: drop-shadow(
+    0 0 7px rgba(85, 195, 203, .85)
+  );
 }
 
 .popup-paperclip[data-status="planned"] .clip-gem {
@@ -477,25 +704,61 @@ button:disabled {
 }
 
 /* =========================================================
-   INNER POPUP LAYOUT
+   POPUP CONTENT
+
+   Layout:
+   1. Title / metadata
+   2. Personal observations
+   3. Child collections
+
+   All three fit inside the popup.
+
+   Only the actual child list scrolls.
 ========================================================= */
 
 .popup-inner {
-  position: relative;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
-  gap: 16px;
-  min-height: 0;
-  padding: 0 34px 30px;
-  margin-top: -82px;
+  position: absolute;
+  inset: 0;
+
   z-index: 3;
+
+  display: grid;
+
+  grid-template-rows:
+    auto
+    minmax(65px, 1fr)
+    minmax(160px, 31%);
+
+  gap: clamp(10px, 1.8vh, 20px);
+
+  min-height: 0;
+
+  margin: 0;
+
+  padding:
+    clamp(230px, 35%, 315px)
+    clamp(25px, 4.8vw, 56px)
+    clamp(24px, 3.5%, 36px);
+
+  overflow: hidden;
 }
+
+/* =========================================================
+   HEADING AND METADATA
+========================================================= */
 
 .popup-head {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(220px, .75fr);
-  gap: 26px;
+
+  grid-template-columns:
+    minmax(0, 1.2fr)
+    minmax(190px, .8fr);
+
+  gap: 24px;
+
   align-items: end;
+
+  min-width: 0;
   min-height: 0;
 }
 
@@ -506,29 +769,42 @@ button:disabled {
 
 .popup-type {
   display: block;
-  margin-bottom: 10px;
-  color: #a7a3c2;
+  margin-bottom: 6px;
+
+  color: #aaa5c9;
+
   font-size: 10px;
-  letter-spacing: 0.28em;
+  letter-spacing: .26em;
   text-transform: uppercase;
+
+  text-shadow: 0 2px 12px rgba(0,0,0,.5);
 }
 
 .popup-title {
   margin: 0;
-  color: #f5f2ff;
-  font: 500 clamp(42px, 5vw, 74px) / 0.98 var(--serif);
-  letter-spacing: -0.03em;
-  text-wrap: balance;
-  text-shadow: 0 4px 28px rgba(0, 0, 0, 0.46);
+
+  color: #f6f3ff;
+
+  font:
+    500 clamp(42px, 5.4vw, 76px)/.98
+    var(--serif);
+
+  letter-spacing: -.03em;
+  overflow-wrap: anywhere;
+
+  text-shadow:
+    0 3px 27px rgba(0,0,0,.58);
 }
 
 .popup-rating {
-  margin-top: 13px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
   align-items: center;
-  min-height: 25px;
+  flex-wrap: wrap;
+
+  gap: 10px;
+
+  min-height: 24px;
+  margin-top: 10px;
 }
 
 .rating-stars {
@@ -537,89 +813,154 @@ button:disabled {
 }
 
 .rating-star {
+  display: inline-block;
   width: 18px;
   height: 18px;
-  display: inline-block;
 }
 
 .rating-star svg {
+  display: block;
   width: 100%;
   height: 100%;
-  display: block;
 }
 
 .rating-value {
   color: #d3cdec;
   font-size: 12px;
-  letter-spacing: 0.11em;
+  letter-spacing: .08em;
 }
 
 .rating-unrated {
-  color: #7e7998;
+  color: #aba5c9;
   font-size: 12px;
-  letter-spacing: 0.08em;
+  letter-spacing: .06em;
 }
 
 .popup-submeta {
-  margin-top: 8px;
-  color: #9e99b9;
-  font-size: 13px;
-  letter-spacing: 0.03em;
+  margin-top: 7px;
+
+  color: #c4bdd9;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .popup-head-right {
   display: flex;
   flex-direction: column;
+
   align-items: flex-end;
   justify-content: flex-end;
-  gap: 12px;
+
+  gap: 7px;
+
+  min-width: 0;
+
   text-align: right;
 }
 
 .popup-meta-primary {
-  color: #ece8fb;
-  font: 500 clamp(20px, 2.8vw, 34px) / 1.15 var(--serif);
+  color: #f1ecff;
+
+  font:
+    500 clamp(21px, 2.9vw, 35px)/1.12
+    var(--serif);
+
+  text-shadow:
+    0 2px 14px rgba(0,0,0,.45);
 }
 
 .popup-meta-secondary {
-  color: #a9a5c3;
-  font-size: 13px;
-  line-height: 1.85;
+  color: #bcb5d5;
+
+  font-size: 12px;
+  line-height: 1.65;
 }
+
+/* =========================================================
+   OBSERVATIONS
+
+   No heading.
+   No rectangle.
+   No scrolling.
+
+   Text stays in its reserved area.
+========================================================= */
 
 .popup-notes-section {
   position: relative;
-  min-height: 150px;
-  padding: 14px 0 6px;
+
+  min-height: 0;
+  overflow: hidden;
+
+  padding: 10px 0;
 }
 
 .popup-notes-section::before {
   content: "";
+
   position: absolute;
-  inset: 0 -16px;
-  background:
-    linear-gradient(
-      180deg,
-      transparent 0%,
-      rgba(89, 79, 150, 0.07) 40%,
-      rgba(46, 42, 88, 0.08) 62%,
-      transparent 100%
-    );
-  mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
-  -webkit-mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+  inset: 0 -12px;
+
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(116, 99, 177, .035) 34%,
+    rgba(87, 78, 151, .065) 55%,
+    transparent 100%
+  );
+
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 9%,
+    black 91%,
+    transparent
+  );
+
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 9%,
+    black 91%,
+    transparent
+  );
+
   pointer-events: none;
 }
 
 .popup-notes {
   position: relative;
-  min-height: 116px;
-  max-height: 140px;
-  color: #cbc6dd;
-  font-size: 14px;
-  line-height: 1.95;
-  white-space: pre-wrap;
+
+  width: 100%;
+  height: 100%;
+
+  min-height: 0;
+  max-height: none;
+
   overflow: hidden;
-  text-wrap: pretty;
+
+  color: #d1cce1;
+
+  font-size: 14px;
+  font-weight: 300;
+  line-height: 1.8;
+
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+
+  mask-image: linear-gradient(
+    to bottom,
+    black 0%,
+    black 78%,
+    transparent 100%
+  );
+
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 0%,
+    black 78%,
+    transparent 100%
+  );
 }
 
 .popup-notes.is-empty {
@@ -628,192 +969,379 @@ button:disabled {
 }
 
 /* =========================================================
-   CHILD SECTIONS
-   Only THESE scroll
+   CHILD COLLECTION AREA
+
+   NOW RESERVED INSIDE THE POPUP
 ========================================================= */
 
 .popup-children-section {
   display: grid;
-  grid-template-rows: auto 1fr;
-  gap: 14px;
+
+  grid-template-rows:
+    31px
+    minmax(0, 1fr);
+
+  gap: 10px;
+
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+
+  overflow: hidden;
 }
 
 .popup-children-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
+
   gap: 12px;
+
+  min-height: 0;
 }
 
 .popup-children-label {
-  color: #a29ebd;
+  color: #ada7c8;
+
   font-size: 10px;
-  letter-spacing: 0.22em;
+  letter-spacing: .21em;
   text-transform: uppercase;
 }
 
 .popup-add-child {
-  width: 34px;
-  height: 34px;
+  display: grid;
+  place-items: center;
+
+  width: 32px;
+  height: 32px;
+
   padding: 0;
-  border: 1px solid rgba(228, 223, 255, 0.09);
-  border-radius: 999px;
-  background: rgba(106, 96, 172, 0.08);
+  flex-shrink: 0;
+
+  border: 1px solid rgba(
+    228, 223, 255, .11
+  );
+
+  border-radius: 50%;
+
+  background: rgba(106, 96, 172, .10);
   color: #ece8fb;
+
   font-size: 21px;
 }
 
 .popup-children {
+  min-width: 0;
   min-height: 0;
-}
+  height: 100%;
 
-/* Group children -> horizontal */
-.popup-children.is-group {
-  display: flex;
-  gap: 14px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(173, 160, 229, 0.25) transparent;
-  -webkit-overflow-scrolling: touch;
-}
+  overscroll-behavior: contain;
 
-/* Series children -> vertical */
-.popup-children.is-production {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow-y: auto;
-  overflow-x: hidden;
   scrollbar-width: thin;
-  scrollbar-color: rgba(173, 160, 229, 0.25) transparent;
-  -webkit-overflow-scrolling: touch;
-}
+  scrollbar-color:
+    rgba(173, 160, 229, .3)
+    transparent;
 
-/* Season children -> grid */
-.popup-children.is-season {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  align-content: start;
-  gap: 12px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(173, 160, 229, 0.25) transparent;
   -webkit-overflow-scrolling: touch;
 }
 
 .popup-children-empty {
-  color: #76718d;
-  font-size: 13px;
-  padding: 20px 0;
-}
+  padding: 16px 0;
 
-/* Child cards — NO IMAGES */
-
-.child-production-card,
-.child-season-card,
-.child-episode-card {
-  color: #efebff;
-  text-align: left;
-  border: 1px solid rgba(230, 225, 255, 0.05);
-  background:
-    linear-gradient(180deg, rgba(111, 102, 183, 0.12), rgba(44, 42, 76, 0.08));
-  backdrop-filter: blur(7px);
-  -webkit-backdrop-filter: blur(7px);
-  transition: transform .22s ease, background .22s ease;
-}
-
-.child-production-card:hover,
-.child-season-card:hover,
-.child-episode-card:hover {
-  transform: translateY(-2px);
-  background:
-    linear-gradient(180deg, rgba(120, 110, 194, 0.16), rgba(55, 52, 93, 0.11));
-}
-
-.child-production-card {
-  flex: 0 0 210px;
-  min-height: 126px;
-  padding: 18px 16px;
-  border-radius: 18px;
-}
-
-.child-production-title {
-  display: block;
-  font: 500 24px/1.02 var(--serif);
-  margin-bottom: 10px;
-  text-wrap: balance;
-}
-
-.child-production-sub {
-  display: block;
-  color: #aba6c6;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.child-season-card {
-  min-height: 66px;
-  padding: 15px 16px;
-  border-radius: 14px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 14px;
-}
-
-.child-season-title {
-  font: 500 24px/1.05 var(--serif);
-}
-
-.child-season-meta {
-  color: #b3aecf;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.child-episode-card {
-  min-height: 112px;
-  padding: 15px 14px;
-  border-radius: 16px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.child-episode-number {
-  color: #b7b1d2;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-}
-
-.child-episode-title {
-  font: 500 20px/1.05 var(--serif);
-  margin: 10px 0 8px;
-  text-wrap: balance;
-}
-
-.child-episode-meta {
-  color: #a59fbe;
+  color: #918ba9;
   font-size: 12px;
 }
 
 /* =========================================================
-   GENERIC OVERLAYS / SHEETS
+   GROUP PRODUCTIONS
+
+   Horizontal scrolling ONLY.
+
+   Cards entirely visible vertically.
+   No images.
+========================================================= */
+
+.popup-children.is-group {
+  display: flex;
+  flex-direction: row;
+
+  align-items: stretch;
+
+  gap: 14px;
+
+  overflow-x: auto;
+  overflow-y: hidden;
+
+  padding:
+    3px
+    2px
+    13px;
+
+  scroll-snap-type: x proximity;
+}
+
+.child-production-card {
+  position: relative;
+
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+
+  flex: 0 0 clamp(
+    190px,
+    25vw,
+    260px
+  );
+
+  min-height: 0;
+  height: 100%;
+
+  padding: 16px 17px;
+
+  border: 1px solid rgba(
+    222, 217, 255, .09
+  );
+
+  border-radius: 15px;
+
+  background:
+    radial-gradient(
+      ellipse at 85% 12%,
+      rgba(131, 121, 199, .12),
+      transparent 75%
+    ),
+    linear-gradient(
+      145deg,
+      rgba(105, 96, 170, .19),
+      rgba(48, 46, 94, .11)
+    );
+
+  color: #f0ecff;
+  text-align: left;
+
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+
+  scroll-snap-align: start;
+
+  overflow: hidden;
+
+  transition:
+    background .25s ease,
+    border-color .25s ease;
+}
+
+.child-production-card:hover {
+  background:
+    linear-gradient(
+      145deg,
+      rgba(120, 108, 192, .25),
+      rgba(58, 54, 111, .15)
+    );
+
+  border-color: rgba(
+    222, 217, 255, .16
+  );
+}
+
+.child-production-title {
+  display: block;
+
+  margin-bottom: 8px;
+
+  color: #f1edff;
+
+  font:
+    500 clamp(22px, 2.7vw, 29px)/1.05
+    var(--serif);
+
+  overflow-wrap: anywhere;
+}
+
+.child-production-sub {
+  display: block;
+
+  color: #bbb3d4;
+
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* =========================================================
+   PRODUCTION SEASONS
+
+   Vertical scrolling ONLY.
+   All entries remain accessible.
+========================================================= */
+
+.popup-children.is-production {
+  display: flex;
+  flex-direction: column;
+
+  align-items: stretch;
+
+  gap: 8px;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  padding: 2px 3px 5px;
+}
+
+.child-season-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  flex: 0 0 auto;
+
+  gap: 13px;
+
+  width: 100%;
+  min-height: 55px;
+
+  padding: 12px 16px;
+
+  border: 1px solid rgba(
+    224, 219, 255, .07
+  );
+
+  border-radius: 11px;
+
+  background: linear-gradient(
+    90deg,
+    rgba(109, 99, 177, .24),
+    rgba(64, 57, 112, .11)
+  );
+
+  color: #eee9fb;
+  text-align: left;
+
+  transition: background .25s ease;
+}
+
+.child-season-card:hover {
+  background: rgba(
+    117, 104, 187, .25
+  );
+}
+
+.child-season-title {
+  min-width: 0;
+
+  font:
+    500 23px/1.1
+    var(--serif);
+
+  overflow-wrap: anywhere;
+}
+
+.child-season-meta {
+  flex-shrink: 0;
+
+  color: #b9b1d4;
+
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   SEASON EPISODES
+
+   Internally scrollable grid.
+   No images.
+========================================================= */
+
+.popup-children.is-season {
+  display: grid;
+
+  grid-template-columns:
+    repeat(
+      auto-fill,
+      minmax(125px, 1fr)
+    );
+
+  grid-auto-rows: 115px;
+  align-content: start;
+
+  gap: 11px;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  padding: 3px 4px 6px 2px;
+}
+
+.child-episode-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  min-width: 0;
+  min-height: 0;
+
+  padding: 12px;
+
+  border: 1px solid rgba(
+    224, 219, 255, .075
+  );
+
+  border-radius: 13px;
+
+  background: linear-gradient(
+    160deg,
+    rgba(110, 102, 182, .20),
+    rgba(55, 51, 101, .12)
+  );
+
+  color: #efeaff;
+  text-align: left;
+
+  overflow: hidden;
+}
+
+.child-episode-card:hover {
+  background: rgba(
+    115, 104, 185, .25
+  );
+}
+
+.child-episode-number {
+  color: #b7b0d1;
+
+  font-size: 10px;
+  letter-spacing: .09em;
+}
+
+.child-episode-title {
+  font:
+    500 19px/1.05
+    var(--serif);
+
+  overflow-wrap: anywhere;
+}
+
+.child-episode-meta {
+  color: #b4adce;
+  font-size: 11px;
+}
+
+/* =========================================================
+   STANDARD OVERLAYS
 ========================================================= */
 
 .overlay {
   position: fixed;
   inset: 0;
   z-index: 40;
+
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity .3s, visibility .3s;
+
+  transition:
+    opacity .3s,
+    visibility .3s;
 }
 
 .overlay.open {
@@ -825,7 +1353,9 @@ button:disabled {
 .overlay-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(2, 3, 10, 0.62);
+
+  background: rgba(2, 3, 10, .62);
+
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
 }
@@ -836,18 +1366,34 @@ button:disabled {
 .confirm-sheet {
   position: absolute;
   left: 50%;
+
   transform: translate(-50%, 18px);
-  border: 1px solid rgba(211, 208, 245, 0.09);
+
+  border: 1px solid rgba(
+    211, 208, 245, .09
+  );
+
   border-radius: 20px;
-  background:
-    linear-gradient(145deg, rgba(18, 23, 47, 0.90), rgba(8, 11, 24, 0.94));
-  box-shadow: 0 30px 110px rgba(0, 0, 0, 0.35);
+
+  background: linear-gradient(
+    145deg,
+    rgba(18, 23, 47, .90),
+    rgba(8, 11, 24, .94)
+  );
+
+  box-shadow:
+    0 30px 110px rgba(0, 0, 0, .35);
+
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
+
   overflow-y: auto;
+
   scrollbar-width: thin;
   scrollbar-color: #575373 transparent;
-  transition: transform .34s var(--ease);
+
+  transition:
+    transform .34s var(--ease);
 }
 
 .overlay.open .detail-sheet,
@@ -858,47 +1404,71 @@ button:disabled {
 
 .detail-sheet {
   top: 5%;
+
   width: min(850px, 94vw);
   max-height: 90%;
 }
 
 .editor-sheet {
   top: 3%;
+
   width: min(860px, 96vw);
   max-height: 94%;
 }
 
 .search-panel {
   top: 10%;
+
   width: min(620px, 94vw);
   max-height: 80%;
+
   padding: 24px;
 }
 
-.confirm-overlay { z-index: 65; }
+.confirm-overlay {
+  z-index: 65;
+}
 
 .confirm-sheet {
   top: 50%;
-  width: min(430px, calc(100vw - 32px));
+
+  width: min(
+    430px,
+    calc(100vw - 32px)
+  );
+
   max-height: 80%;
   padding: 30px;
-  transform: translate(-50%, calc(-50% + 18px));
+
+  transform: translate(
+    -50%,
+    calc(-50% + 18px)
+  );
 }
 
 .confirm-overlay.open .confirm-sheet {
   transform: translate(-50%, -50%);
 }
 
+/* =========================================================
+   COMMON PANEL TYPOGRAPHY
+========================================================= */
+
 .close-button {
   display: grid;
   place-items: center;
+
   width: 40px;
   height: 40px;
+
   padding: 0;
+
   border: 0;
-  border-radius: 999px;
-  background: rgba(35, 37, 65, 0.34);
+  border-radius: 50%;
+
+  background: rgba(35, 37, 65, .34);
   color: #efebff;
+
   font-size: 28px;
 }
 
@@ -906,19 +1476,24 @@ button:disabled {
   position: sticky;
   top: 12px;
   z-index: 4;
+
   margin: 12px 12px -44px auto;
 }
 
 .detail-content {
-  padding: 62px clamp(24px, 6vw, 67px);
+  padding:
+    62px
+    clamp(24px, 6vw, 67px);
 }
 
 .panel-eyebrow,
 .detail-eyebrow {
   display: block;
+
   color: #aaa3d0;
+
   font-size: 10px;
-  letter-spacing: 0.26em;
+  letter-spacing: .26em;
   text-transform: uppercase;
 }
 
@@ -929,19 +1504,26 @@ button:disabled {
 .detail-content h2,
 .editor-header h2 {
   margin: 16px 0 24px;
-  font: 500 clamp(37px, 6vw, 65px)/1.1 var(--serif);
+
+  font:
+    500 clamp(37px, 6vw, 65px)/1.1
+    var(--serif);
 }
 
 .detail-content h3,
 .editor-content h3 {
   margin: 42px 0 22px;
-  font: 500 27px var(--serif);
+
+  font:
+    500 27px
+    var(--serif);
 }
 
 .detail-content p,
 .editor-content p,
 .confirm-sheet p {
   color: var(--muted);
+
   font-size: 13px;
   line-height: 2;
 }
@@ -956,15 +1538,25 @@ button:disabled {
 
 .panel-topline h2 {
   margin: 0 0 22px;
-  font: 500 30px var(--serif);
+
+  font:
+    500 30px
+    var(--serif);
 }
 
 .editor-header {
   position: sticky;
   top: 0;
   z-index: 5;
+
   padding: 28px 34px 13px;
-  background: linear-gradient(180deg, rgba(13, 16, 33, 0.98) 65%, rgba(13, 16, 33, 0.68) 90%, transparent);
+
+  background: linear-gradient(
+    180deg,
+    rgba(13, 16, 33, .98) 65%,
+    rgba(13, 16, 33, .68) 90%,
+    transparent
+  );
 }
 
 .editor-header h2 {
@@ -973,43 +1565,70 @@ button:disabled {
 }
 
 .editor-content {
-  padding: 18px clamp(22px, 5vw, 48px) 50px;
+  padding:
+    18px
+    clamp(22px, 5vw, 48px)
+    50px;
 }
 
 /* =========================================================
-   BUTTONS / FORMS
+   BUTTONS
 ========================================================= */
 
 .soft-button,
 .detail-action {
   display: inline-flex;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
+
   gap: 8px;
+
   min-height: 43px;
   padding: 12px 18px;
-  border: 1px solid rgba(205, 199, 244, 0.15);
+
+  border: 1px solid rgba(
+    205, 199, 244, .15
+  );
+
   border-radius: 12px;
-  background: rgba(138, 127, 209, 0.10);
+
+  background: rgba(
+    138, 127, 209, .10
+  );
+
   color: #ebe6fc;
   font-size: 12px;
+
   transition: background .25s;
 }
 
 .soft-button:hover,
 .detail-action:hover {
-  background: rgba(138, 127, 209, 0.18);
+  background: rgba(
+    138, 127, 209, .18
+  );
 }
 
 .primary-button {
-  background: rgba(170, 153, 236, 0.22);
-  border-color: rgba(195, 182, 246, 0.28);
+  background: rgba(
+    170, 153, 236, .22
+  );
+
+  border-color: rgba(
+    195, 182, 246, .28
+  );
 }
 
 .danger-button {
   color: #f0bac0;
-  border-color: rgba(216, 117, 133, 0.22);
-  background: rgba(145, 48, 65, 0.14);
+
+  border-color: rgba(
+    216, 117, 133, .22
+  );
+
+  background: rgba(
+    145, 48, 65, .14
+  );
 }
 
 .button-row,
@@ -1022,23 +1641,45 @@ button:disabled {
 }
 
 .confirm-actions,
-.form-actions { justify-content: flex-end; }
-.confirm-actions { margin-top: 28px; }
-.manager-actions { margin-bottom: 34px; }
-.form-actions { margin-top: 16px; }
+.form-actions {
+  justify-content: flex-end;
+}
 
-.manager-section { margin-top: 35px; }
+.confirm-actions {
+  margin-top: 28px;
+}
+
+.manager-actions {
+  margin-bottom: 34px;
+}
+
+.form-actions {
+  margin-top: 16px;
+}
+
+/* =========================================================
+   ARCHIVE MANAGER
+========================================================= */
+
+.manager-section {
+  margin-top: 35px;
+}
 
 .manager-section-title {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+
   gap: 16px;
+
   padding-bottom: 13px;
+
   border-bottom: 1px solid var(--soft-line);
 }
 
-.manager-section-title h3 { margin: 0; }
+.manager-section-title h3 {
+  margin: 0;
+}
 
 .manager-count,
 .manager-item-subtitle {
@@ -1050,6 +1691,7 @@ button:disabled {
 .child-list {
   display: flex;
   flex-direction: column;
+
   gap: 6px;
   margin-top: 14px;
 }
@@ -1058,15 +1700,20 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
+
   gap: 12px;
   min-height: 57px;
   padding: 11px 0;
-  border-bottom: 1px solid rgba(195, 197, 242, 0.06);
+
+  border-bottom: 1px solid rgba(
+    195, 197, 242, .06
+  );
 }
 
 .manager-item-main {
   display: flex;
   flex-direction: column;
+
   gap: 6px;
   min-width: 0;
 }
@@ -1074,6 +1721,7 @@ button:disabled {
 .manager-item-title {
   color: var(--text);
   font-size: 13px;
+
   overflow-wrap: anywhere;
 }
 
@@ -1088,9 +1736,12 @@ button:disabled {
 .child-controls button {
   min-width: 35px;
   min-height: 35px;
+
   padding: 5px 9px;
+
   border: 0;
   border-radius: 8px;
+
   background: transparent;
   color: #aaa3cc;
 }
@@ -1098,14 +1749,22 @@ button:disabled {
 .mini-button:hover,
 .child-controls button:hover {
   color: #fff;
-  background: rgba(168, 151, 228, 0.12);
+
+  background: rgba(
+    168, 151, 228, .12
+  );
 }
 
 .manager-empty {
   padding: 22px 0;
+
   color: var(--faint);
   font-size: 12px;
 }
+
+/* =========================================================
+   FORMS
+========================================================= */
 
 .archive-form {
   display: flex;
@@ -1116,6 +1775,7 @@ button:disabled {
 .form-field {
   display: flex;
   flex-direction: column;
+
   gap: 10px;
   min-width: 0;
 }
@@ -1123,12 +1783,14 @@ button:disabled {
 .form-field label,
 .library-control label {
   color: #c4bfd9;
+
   font-size: 11px;
-  letter-spacing: 0.05em;
+  letter-spacing: .05em;
 }
 
 .form-field small {
   color: var(--faint);
+
   font-size: 10px;
   line-height: 1.7;
 }
@@ -1140,19 +1802,29 @@ button:disabled {
 .library-select,
 .search-input {
   display: block;
+
   width: 100%;
   min-height: 43px;
+
   padding: 11px 13px;
+
   outline: none;
-  border: 1px solid rgba(199, 198, 245, 0.13);
+
+  border: 1px solid rgba(
+    199, 198, 245, .13
+  );
+
   border-radius: 10px;
-  background: rgba(7, 10, 24, 0.42);
+
+  background: rgba(7, 10, 24, .42);
   color: var(--text);
+
   font-size: 13px;
 }
 
 .form-textarea {
   min-height: 140px;
+
   resize: vertical;
   line-height: 1.85;
 }
@@ -1163,7 +1835,9 @@ button:disabled {
 .library-input:focus,
 .library-select:focus,
 .search-input:focus {
-  border-color: rgba(204, 188, 250, 0.5);
+  border-color: rgba(
+    204, 188, 250, .5
+  );
 }
 
 .form-input::placeholder,
@@ -1180,14 +1854,19 @@ button:disabled {
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+
   gap: 18px;
 }
 
 .field-checkbox {
   display: flex;
   align-items: center;
+
   gap: 11px;
+
   color: #c9c5dc;
   font-size: 12px;
 }
@@ -1196,11 +1875,12 @@ button:disabled {
 .motion-checkbox {
   width: 18px;
   height: 18px;
+
   accent-color: #b9a9ee;
 }
 
 /* =========================================================
-   BANNER UPLOAD
+   BANNER GALLERY UPLOAD
 ========================================================= */
 
 .banner-upload {
@@ -1211,18 +1891,29 @@ button:disabled {
 
 .banner-upload-preview {
   position: relative;
+
   min-height: 175px;
   overflow: hidden;
-  border: 1px solid rgba(190, 186, 237, 0.10);
+
+  border: 1px solid rgba(
+    190, 186, 237, .10
+  );
+
   border-radius: 12px;
-  background:
-    radial-gradient(ellipse at 50% 30%, rgba(65, 66, 117, 0.27), rgba(6, 8, 23, 0.35) 75%);
+
+  background: radial-gradient(
+    ellipse at 50% 30%,
+    rgba(65, 66, 117, .27),
+    rgba(6, 8, 23, .35) 75%
+  );
 }
 
 .banner-preview-image {
   display: block;
+
   width: 100%;
   height: 205px;
+
   object-fit: cover;
   object-position: center;
 }
@@ -1230,9 +1921,14 @@ button:disabled {
 .banner-preview-empty {
   display: grid;
   place-items: center;
+
   min-height: 175px;
+
   color: #aaa5cf;
-  font: 500 28px var(--serif);
+
+  font:
+    500 28px
+    var(--serif);
 }
 
 .banner-upload-actions {
@@ -1243,17 +1939,19 @@ button:disabled {
 
 .banner-upload-note {
   color: #88839f;
+
   font-size: 11px;
   line-height: 1.7;
 }
 
 /* =========================================================
-   GENRES
+   GENRE CREATION
 ========================================================= */
 
 .genre-create-row {
   display: flex;
   gap: 10px;
+
   margin: 23px 0 25px;
 }
 
@@ -1270,12 +1968,22 @@ button:disabled {
 .genre-chip {
   display: inline-flex;
   align-items: center;
+
   gap: 12px;
-  padding: 10px 13px;
   max-width: 100%;
-  border: 1px solid rgba(202, 195, 242, 0.14);
+
+  padding: 10px 13px;
+
+  border: 1px solid rgba(
+    202, 195, 242, .14
+  );
+
   border-radius: 999px;
-  background: rgba(138, 134, 206, 0.095);
+
+  background: rgba(
+    138, 134, 206, .095
+  );
+
   color: #e2dff3;
   font-size: 12px;
 }
@@ -1283,34 +1991,40 @@ button:disabled {
 .genre-chip button {
   border: 0;
   padding: 0;
+
   background: transparent;
   color: #aaa4c8;
+
   font-size: 17px;
 }
 
 /* =========================================================
-   LIBRARY / SEARCH
+   LIBRARY AND SEARCH
 ========================================================= */
 
 .library-toolbar {
   display: flex;
   flex-wrap: wrap;
+
   gap: 14px;
   margin: 34px 0 24px;
 }
 
 .library-control {
-  flex: 1 1 160px;
-  min-width: 0;
   display: flex;
   flex-direction: column;
+
+  flex: 1 1 160px;
+
   gap: 9px;
+  min-width: 0;
 }
 
 .library-count {
+  margin-bottom: 20px;
+
   color: var(--faint);
   font-size: 11px;
-  margin-bottom: 20px;
 }
 
 .library-results,
@@ -1325,20 +2039,33 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+
   gap: 14px;
+
   width: 100%;
   min-height: 70px;
+
   padding: 15px;
-  border: 1px solid rgba(204, 201, 244, 0.065);
+
+  border: 1px solid rgba(
+    204, 201, 244, .065
+  );
+
   border-radius: 10px;
-  background: rgba(90, 91, 151, 0.08);
+
+  background: rgba(
+    90, 91, 151, .08
+  );
+
   color: var(--text);
   text-align: left;
 }
 
 .library-entry:hover,
 .search-result:hover {
-  background: rgba(117, 113, 181, 0.16);
+  background: rgba(
+    117, 113, 181, .16
+  );
 }
 
 .library-entry-main {
@@ -1348,7 +2075,9 @@ button:disabled {
 }
 
 .library-entry-title {
-  font: 500 18px var(--serif);
+  font:
+    500 18px
+    var(--serif);
 }
 
 .library-entry-meta,
@@ -1363,12 +2092,14 @@ button:disabled {
 }
 
 .library-empty {
-  text-align: center;
   padding: 65px 10px;
+  text-align: center;
 }
 
 .library-empty h3 {
-  font: 500 28px var(--serif);
+  font:
+    500 28px
+    var(--serif);
 }
 
 .library-empty p {
@@ -1381,34 +2112,44 @@ button:disabled {
 }
 
 /* =========================================================
-   SETTINGS / CONFIRM / TOAST
+   SETTINGS, CONFIRMATION & TOAST
 ========================================================= */
 
 .detail-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+
   gap: 20px;
+
   padding: 20px 0;
-  border-bottom: 1px solid var(--soft-line);
+
+  border-bottom:
+    1px solid var(--soft-line);
 }
 
 .setting-range {
   width: min(210px, 45vw);
+
   accent-color: #c0b0f1;
 }
 
 .setting-value {
   display: inline-block;
   min-width: 28px;
+
   color: var(--muted);
+
   text-align: right;
   font-size: 12px;
 }
 
 .confirm-sheet h2 {
   margin: 0 0 18px;
-  font: 500 30px var(--serif);
+
+  font:
+    500 30px
+    var(--serif);
 }
 
 .confirm-sheet p {
@@ -1418,19 +2159,33 @@ button:disabled {
 .toast {
   position: fixed;
   z-index: 80;
+
   left: 50%;
-  bottom: calc(24px + env(safe-area-inset-bottom));
+  bottom: calc(
+    24px + env(safe-area-inset-bottom)
+  );
+
   transform: translate(-50%, 13px);
+
   max-width: calc(100vw - 30px);
+
   padding: 13px 20px;
-  border: 1px solid rgba(209, 206, 240, 0.08);
+
+  border: 1px solid rgba(
+    209, 206, 240, .08
+  );
+
   border-radius: 999px;
-  background: rgba(14, 17, 34, 0.95);
+
+  background: rgba(14, 17, 34, .95);
   color: #eeeafb;
+
   font-size: 12px;
   text-align: center;
+
   opacity: 0;
   pointer-events: none;
+
   transition: .3s var(--ease);
 }
 
@@ -1440,13 +2195,18 @@ button:disabled {
 }
 
 /* =========================================================
-   MOBILE
+   TABLETS AND SMALL SCREENS
 ========================================================= */
 
 @media (max-width: 760px) {
+
   .universe-controls {
     right: 10px;
-    bottom: calc(12px + env(safe-area-inset-bottom));
+
+    bottom: calc(
+      12px + env(safe-area-inset-bottom)
+    );
+
     gap: 5px;
   }
 
@@ -1455,11 +2215,18 @@ button:disabled {
     height: 40px;
   }
 
+  /* POPUP MOBILE FRAME */
+
   .archive-popup {
-    width: calc(100vw - 16px);
-    height: calc(100dvh - 16px);
-    border-radius: 24px;
-    grid-template-rows: 240px 1fr;
+    width: calc(100vw - 18px);
+
+    height: calc(
+      100dvh - 30px
+      - env(safe-area-inset-top)
+      - env(safe-area-inset-bottom)
+    );
+
+    border-radius: 22px;
   }
 
   .popup-controls {
@@ -1469,84 +2236,203 @@ button:disabled {
   }
 
   .popup-icon-button {
-    width: 38px;
-    height: 38px;
+    width: 37px;
+    height: 37px;
   }
 
   .popup-paperclip {
-    left: 20px;
     top: 42px;
-    width: 48px;
-    height: 108px;
+    left: 19px;
+
+    width: 45px;
+    height: 104px;
   }
 
+  /* The image extends well into the text area. */
+
+  .popup-top {
+    height: 69%;
+  }
+
+  .popup-banner {
+    background-position: center 32%;
+  }
+
+  /* This fixes the screenshot's empty middle
+     and clipped production cards. */
+
   .popup-inner {
-    padding: 0 18px 20px;
-    margin-top: -56px;
-    gap: 14px;
+    grid-template-rows:
+      auto
+      minmax(50px, 1fr)
+      minmax(160px, 29%);
+
+    gap: 11px;
+
+    padding:
+      clamp(190px, 31%, 255px)
+      20px
+      26px;
   }
 
   .popup-head {
     grid-template-columns: 1fr;
-    gap: 18px;
+    gap: 9px;
+
+    align-items: start;
   }
 
-  .popup-head-right {
-    align-items: flex-start;
-    text-align: left;
+  .popup-type {
+    margin-bottom: 4px;
+
+    font-size: 9px;
+    letter-spacing: .22em;
   }
 
   .popup-title {
-    font-size: clamp(40px, 12vw, 60px);
+    font-size: clamp(
+      40px,
+      11.5vw,
+      62px
+    );
+
+    line-height: .96;
+  }
+
+  .popup-rating {
+    margin-top: 8px;
+    gap: 8px;
+  }
+
+  .rating-star {
+    width: 15px;
+    height: 15px;
+  }
+
+  .rating-stars {
+    gap: 2px;
+  }
+
+  .rating-value,
+  .rating-unrated {
+    font-size: 11px;
+  }
+
+  .popup-submeta {
+    margin-top: 6px;
+    font-size: 11px;
+  }
+
+  .popup-head-right {
+    align-items: flex-end;
+    text-align: right;
+
+    gap: 3px;
   }
 
   .popup-meta-primary {
-    font-size: 24px;
+    font-size: 23px;
   }
 
   .popup-meta-secondary {
-    font-size: 12px;
+    font-size: 11px;
+  }
+
+  .popup-notes-section {
+    padding: 6px 0;
   }
 
   .popup-notes {
-    min-height: 104px;
-    max-height: 132px;
-    font-size: 13px;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  /* CHILD AREA — FULLY VISIBLE */
+
+  .popup-children-section {
+    grid-template-rows:
+      30px
+      minmax(0, 1fr);
+
+    gap: 8px;
+  }
+
+  .popup-children-label {
+    font-size: 9px;
+    letter-spacing: .18em;
+  }
+
+  .popup-add-child {
+    width: 31px;
+    height: 31px;
+  }
+
+  .popup-children.is-group {
+    gap: 11px;
+    padding-bottom: 12px;
   }
 
   .child-production-card {
-    flex-basis: 176px;
-    min-height: 110px;
-    padding: 15px 14px;
+    flex-basis: min(62vw, 230px);
+
+    height: 100%;
+    min-height: 0;
+
+    padding: 14px;
+    border-radius: 13px;
   }
 
   .child-production-title {
-    font-size: 21px;
+    font-size: 23px;
+  }
+
+  .child-production-sub {
+    font-size: 10px;
   }
 
   .child-season-card {
-    min-height: 60px;
-    padding: 14px;
+    min-height: 49px;
+    padding: 10px 12px;
   }
 
   .child-season-title {
     font-size: 20px;
   }
 
+  .child-season-meta {
+    font-size: 10px;
+  }
+
+  .popup-children.is-season {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+
+    grid-auto-rows: 96px;
+    gap: 9px;
+  }
+
   .child-episode-card {
-    min-height: 100px;
-    padding: 13px 12px;
+    padding: 10px;
   }
 
   .child-episode-title {
     font-size: 18px;
   }
 
+  .child-episode-number,
+  .child-episode-meta {
+    font-size: 10px;
+  }
+
+  /* OTHER PANELS */
+
   .detail-sheet,
   .editor-sheet {
     top: 2%;
+
     width: calc(100vw - 14px);
     max-height: 96%;
+
     border-radius: 14px;
   }
 
@@ -1594,10 +2480,90 @@ button:disabled {
 }
 
 /* =========================================================
+   SHORT PHONES
+
+   Slightly compress upper elements instead of
+   sacrificing the child cards.
+========================================================= */
+
+@media (max-height: 700px) {
+
+  .archive-popup {
+    height: calc(100dvh - 14px);
+  }
+
+  .popup-inner {
+    padding-top: 26%;
+    padding-bottom: 14px;
+
+    grid-template-rows:
+      auto
+      minmax(30px, 1fr)
+      minmax(135px, 31%);
+
+    gap: 7px;
+  }
+
+  .popup-type {
+    margin-bottom: 2px;
+  }
+
+  .popup-title {
+    font-size: clamp(32px, 9vw, 52px);
+  }
+
+  .popup-head {
+    gap: 5px;
+  }
+
+  .popup-rating {
+    margin-top: 5px;
+  }
+
+  .popup-meta-primary {
+    font-size: 19px;
+  }
+
+  .popup-notes {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .popup-children-section {
+    gap: 6px;
+  }
+}
+
+/* =========================================================
+   VERY SMALL SCREENS
+========================================================= */
+
+@media (max-width: 360px) {
+
+  .popup-inner {
+    padding-left: 15px;
+    padding-right: 15px;
+  }
+
+  .popup-title {
+    font-size: 39px;
+  }
+
+  .popup-meta-primary {
+    font-size: 20px;
+  }
+
+  .child-production-card {
+    flex-basis: 65vw;
+  }
+}
+
+/* =========================================================
    REDUCED MOTION
 ========================================================= */
 
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {
