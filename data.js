@@ -1,9 +1,17 @@
+
 "use strict";
 
-window.WATCH_DATA = {
-  appName: "Watch Archive",
-  version: "4.2.0",
+/* ======================================================
+   WATCH ARCHIVE — STEP 5
+   SEASON & EPISODE PAGES
+====================================================== */
 
+window.WATCH_DATA = {
+
+  appName: "Watch Archive",
+  version: "5.0.0",
+
+  // Keep old archive records compatible.
   schemaVersion: 1,
   storageKey: "watch_archive_v1",
 
@@ -26,13 +34,22 @@ window.WATCH_DATA = {
     }
   },
 
+  /* ====================================================
+     BANNER IMAGES
+
+     IndexedDB blobs + stable image IDs.
+
+     Supported on all four record levels.
+     Only selected pictures are stored;
+     banners are entirely optional.
+  ==================================================== */
+
   images: {
     databaseName: "watch_archive_images_v1",
     databaseVersion: 1,
     objectStore: "banners",
 
     maximumInputMB: 35,
-
     maximumWidth: 1920,
     maximumHeight: 1080,
 
@@ -54,8 +71,19 @@ window.WATCH_DATA = {
 
     defaultPositionX: 50,
     defaultPositionY: 35,
-    defaultOpacity: 82
+    defaultOpacity: 82,
+
+    supportedEntities: [
+      "group",
+      "production",
+      "season",
+      "episode"
+    ]
   },
+
+  /* ====================================================
+     CAMERA
+  ==================================================== */
 
   camera: {
     minZoom: 0.10,
@@ -68,14 +96,21 @@ window.WATCH_DATA = {
     smoothness: 0.16
   },
 
+  /* ====================================================
+     COSMIC RENDERER
+  ==================================================== */
+
   graphics: {
     maxPixelRatio: 1.5,
     targetFrameRate: 60,
+
     backgroundStarCount: 1250,
     maximumBackgroundStars: 1900,
+
     nebulaResolution: 0.62,
     nebulaCloudCount: 8,
     nebulaDetail: 4,
+
     enableParallax: true,
     enableTwinkling: true,
     adaptiveQuality: true
@@ -85,31 +120,31 @@ window.WATCH_DATA = {
     navigationStars: {
       radius: 4.7,
       glow: 35,
-      color: [226, 230, 255]
+      color: [226,230,255]
     },
 
     groupStars: {
       radius: 2.1,
       glow: 15,
-      color: [196, 192, 243]
+      color: [196,192,243]
     },
 
     productionStars: {
       radius: 2.65,
       glow: 18,
-      color: [193, 206, 255]
+      color: [193,206,255]
     },
 
     seasonStars: {
       radius: 2.0,
       glow: 14,
-      color: [203, 205, 246]
+      color: [203,205,246]
     },
 
     episodeStars: {
       radius: 1.6,
       glow: 10,
-      color: [201, 211, 242]
+      color: [201,211,242]
     },
 
     lineOpacity: 0.23,
@@ -133,6 +168,10 @@ window.WATCH_DATA = {
     }
   },
 
+  /* ====================================================
+     MAIN CASSIOPEIA-INSPIRED NAVIGATION
+  ==================================================== */
+
   navigation: {
     id: "main-navigation",
     type: "navigation",
@@ -146,6 +185,7 @@ window.WATCH_DATA = {
         magnitude: 1.6,
         action: "library"
       },
+
       {
         id: "genres",
         title: "Genre Creation",
@@ -154,6 +194,7 @@ window.WATCH_DATA = {
         magnitude: 2.7,
         action: "genres"
       },
+
       {
         id: "create",
         title: "Create & Edit",
@@ -162,6 +203,7 @@ window.WATCH_DATA = {
         magnitude: 1.15,
         action: "create"
       },
+
       {
         id: "watchlist",
         title: "Watchlist",
@@ -170,6 +212,7 @@ window.WATCH_DATA = {
         magnitude: 2.2,
         action: "watchlist"
       },
+
       {
         id: "settings",
         title: "Settings",
@@ -196,6 +239,12 @@ window.WATCH_DATA = {
     seed: 73129
   },
 
+  /* ====================================================
+     TEMPORARY SINGLE DEMO GROUP
+
+     Not written into the real archive.
+  ==================================================== */
+
   demoGroups: [
     {
       id: "demo-asoiaf",
@@ -204,7 +253,6 @@ window.WATCH_DATA = {
       demo: true,
       x: 1380,
       y: -760,
-
       mainGenreIds: [],
       secondaryGenreIds: [],
       notes: "",
@@ -218,6 +266,7 @@ window.WATCH_DATA = {
           releaseStart: "2011-04-17",
           releaseEnd: "2019-05-19",
           status: "Finished",
+
           children: [
             {
               id: "demo-got-s1",
@@ -225,31 +274,38 @@ window.WATCH_DATA = {
               type: "season",
               releaseStart: "2011-04-17",
               status: "Finished",
+
               children: [
                 {
                   id: "demo-got-e1",
                   title: "Winter Is Coming",
                   type: "episode",
                   duration: 62,
+                  status: "Finished",
                   children: []
                 },
+
                 {
                   id: "demo-got-e2",
                   title: "The Kingsroad",
                   type: "episode",
                   duration: 56,
+                  status: "Planned",
                   children: []
                 }
               ]
             },
+
             {
               id: "demo-got-s2",
               title: "Season 2",
               type: "season",
+              status: "Planned",
               children: []
             }
           ]
         },
+
         {
           id: "demo-hotd",
           title: "House of the Dragon",
@@ -263,18 +319,26 @@ window.WATCH_DATA = {
     }
   ],
 
+  /* ====================================================
+     POPUP LAYOUTS
+
+     Fixed popup, no overall scrolling.
+     Scroll only the appropriate child area.
+  ==================================================== */
+
   detailPopup: {
     mode: "popup",
 
     dimensions: {
-      desktopWidth: 1000,
-      desktopHeight: 780,
-      mobileInset: 8
+      desktopWidth: 1080,
+      desktopHeight: 810,
+      mobileInset: 9
     },
 
-    notes: {
-      minHeight: 116,
-      maxHeight: 140
+    scrollRules: {
+      popupScrollable: false,
+      notesScrollable: false,
+      childSectionsOnly: true
     },
 
     childLayouts: {
@@ -284,37 +348,85 @@ window.WATCH_DATA = {
       episode: "none"
     },
 
-    scrollRules: {
-      popupScrollable: false,
-      notesScrollable: false,
-      childSectionsOnly: true
+    typeLabels: {
+      group: "COLLECTION",
+      production: "PRODUCTION",
+      season: "SEASON",
+      episode: "EPISODE"
+    },
+
+    showPaperclip: {
+      group: false,
+      production: true,
+      season: true,
+      episode: true
+    },
+
+    showImage: {
+      group: true,
+      production: true,
+      season: true,
+      episode: true
+    },
+
+    observationPlaceholder: "",
+
+    episodeGrid: {
+      minimumColumns: 2,
+      desktopMinimumTileWidth: 135,
+      mobileMinimumTileWidth: 120,
+      showEpisodeNumber: true,
+      showDuration: true,
+      showStatus: true,
+      showRating: true,
+      showImages: false
     }
   },
+
+  /* ====================================================
+     WATCHING STATUS COLORS
+  ==================================================== */
 
   statusVisuals: {
     Watching: {
       key: "watching",
       color: "#416ce4"
     },
+
     Finished: {
       key: "finished",
       color: "#8b67dd"
     },
+
     Discontinued: {
       key: "discontinued",
       color: "#55c3cb"
     },
+
     Planned: {
       key: "planned",
       color: "#8d8fa6"
     }
   },
 
+  statuses: [
+    "Watching",
+    "Finished",
+    "Discontinued",
+    "Planned"
+  ],
+
+  /* ====================================================
+     ARCHIVE RECORD TYPES
+  ==================================================== */
+
   entityTypes: {
+
     group: {
       collection: "groups",
       title: "Group",
       parentType: null,
+
       fields: [
         "id",
         "title",
@@ -337,6 +449,7 @@ window.WATCH_DATA = {
       collection: "productions",
       title: "Production",
       parentType: "group",
+
       fields: [
         "id",
         "title",
@@ -366,10 +479,15 @@ window.WATCH_DATA = {
       collection: "seasons",
       title: "Season",
       parentType: "production",
+
       fields: [
         "id",
         "title",
         "productionId",
+        "banner",
+        "bannerImageId",
+        "bannerPositionX",
+        "bannerPositionY",
         "releaseStart",
         "releaseEnd",
         "status",
@@ -384,26 +502,76 @@ window.WATCH_DATA = {
       collection: "episodes",
       title: "Episode",
       parentType: "season",
+
       fields: [
         "id",
         "title",
         "seasonId",
+        "banner",
+        "bannerImageId",
+        "bannerPositionX",
+        "bannerPositionY",
         "duration",
-        "notes",
+        "releaseStart",
         "watchedAt",
-        "order",
+        "status",
+        "notes",
         "rating",
+        "order",
         "createdAt",
         "updatedAt"
       ]
     }
   },
 
+  /* ====================================================
+     EPISODE DETAIL DISPLAY
+  ==================================================== */
+
+  episodeDetails: {
+    fields: [
+      "title",
+      "duration",
+      "releaseStart",
+      "watchedAt",
+      "status",
+      "notes"
+    ],
+
+    durationUnit: "minutes",
+
+    allowMultipleViewingDates: false,
+
+    emptyDateLabel: "",
+    emptyStatus: "Planned",
+
+    showParentSeason: true,
+    showPositionInSeason: true
+  },
+
+  seasonDetails: {
+    fields: [
+      "title",
+      "releaseStart",
+      "releaseEnd",
+      "status",
+      "notes"
+    ],
+
+    showParentProduction: true,
+    showEpisodeCount: true
+  },
+
+  /* ====================================================
+     CUSTOM GENRES — NO PRESETS
+  ==================================================== */
+
   genreTypes: {
     main: {
       collection: "genres",
       title: "Main Genre"
     },
+
     secondary: {
       collection: "secondaryGenres",
       title: "Secondary Genre / Tag"
@@ -421,12 +589,9 @@ window.WATCH_DATA = {
     "Other"
   ],
 
-  statuses: [
-    "Watching",
-    "Finished",
-    "Discontinued",
-    "Planned"
-  ],
+  /* ====================================================
+     LIBRARY / WATCHLIST
+  ==================================================== */
 
   libraryViews: {
     library: {
@@ -456,6 +621,13 @@ window.WATCH_DATA = {
     { id: "latestRelease", title: "Latest Release" },
     { id: "custom", title: "Custom Order" }
   ],
+
+  /* ====================================================
+     RATINGS
+
+     Visual display can read stored ratings.
+     Interactive scoring and aggregation: Step 6.
+  ==================================================== */
 
   ratings: {
     minimum: 1,
