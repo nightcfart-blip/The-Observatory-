@@ -1,36 +1,38 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-
+  <meta charset="UTF-8" />
   <meta
     name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  >
-
-  <meta name="theme-color" content="#02040b">
-  <meta name="color-scheme" content="dark">
-
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  />
+  <meta name="theme-color" content="#02040b" />
+  <meta name="color-scheme" content="dark" />
   <meta
     name="description"
-    content="A private celestial archive of films, series, seasons and stories."
-  >
+    content="A private celestial archive of films, series, seasons and episodes."
+  />
 
   <title>Watch Archive — Universe</title>
 
-  <link rel="stylesheet" href="./style.css">
+  <!-- nicer typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="./style.css" />
 
   <script src="./data.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
-
 <body>
 
-  <!-- =====================================
-       OUTER SPACE
-  ====================================== -->
-
+  <!-- =========================================
+       BACKGROUND / UNIVERSE
+  ========================================== -->
   <div class="universe" aria-hidden="true">
     <div class="space-base"></div>
     <canvas id="nebulaCanvas"></canvas>
@@ -38,16 +40,14 @@
     <div class="space-vignette"></div>
   </div>
 
-
-  <!-- =====================================
-       CONTINUOUS CONSTELLATION WORLD
-  ====================================== -->
-
+  <!-- =========================================
+       MAIN MOVABLE VIEWPORT
+  ========================================== -->
   <main
     id="viewport"
     class="viewport"
     tabindex="0"
-    aria-label="Explore your celestial archive"
+    aria-label="Explore your archive universe"
   >
     <canvas
       id="constellationCanvas"
@@ -58,24 +58,19 @@
     <div
       id="starLayer"
       class="star-layer"
-      aria-label="Interactive constellation stars"
+      aria-label="Interactive archive constellation"
     ></div>
   </main>
 
-
-  <!-- =====================================
-       MINIMAL WORLD CONTROLS
-  ====================================== -->
-
-  <nav
-    class="universe-controls"
-    aria-label="Universe tools"
-  >
+  <!-- =========================================
+       MINIMAL UNIVERSE CONTROLS
+  ========================================== -->
+  <nav class="universe-controls" aria-label="Universe controls">
     <button
       id="homeButton"
       class="minimal-control"
       type="button"
-      aria-label="Focus on main constellation"
+      aria-label="Return to main constellation"
       title="Main constellation"
     >✧</button>
 
@@ -83,8 +78,8 @@
       id="focusButton"
       class="minimal-control"
       type="button"
-      aria-label="Focus on selected star"
-      title="Focus on selected star"
+      aria-label="Focus on current selection"
+      title="Focus selection"
     >⌾</button>
 
     <button
@@ -96,11 +91,11 @@
     >
       <svg
         viewBox="0 0 24 24"
-        width="20"
-        height="20"
+        width="18"
+        height="18"
         fill="none"
         stroke="currentColor"
-        stroke-width="1.4"
+        stroke-width="1.55"
         stroke-linecap="round"
       >
         <circle cx="10.5" cy="10.5" r="6.5"></circle>
@@ -109,89 +104,83 @@
     </button>
   </nav>
 
-
-  <!-- =====================================
-       GROUP / PRODUCTION PAGE
-       Uses the original page sketches.
-  ====================================== -->
-
+  <!-- =========================================
+       POPUP DETAIL OVERLAY (STEP 4.2)
+       This replaces the "distinctive page" feeling.
+  ========================================== -->
   <div
-    id="pageOverlay"
-    class="page-overlay"
+    id="popupOverlay"
+    class="popup-overlay"
     aria-hidden="true"
   >
-    <div
-      id="pageBackdrop"
-      class="page-backdrop"
-    ></div>
+    <div id="popupBackdrop" class="popup-backdrop"></div>
 
-    <article
-      id="archivePage"
-      class="archive-page"
+    <section
+      id="archivePopup"
+      class="archive-popup"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="pageTitle"
+      aria-labelledby="popupTitle"
       tabindex="-1"
     >
-
-      <!-- Minimal floating controls -->
-      <div class="page-floating-controls">
+      <!-- floating controls -->
+      <div class="popup-controls">
         <button
-          id="pageBackButton"
-          class="page-icon-button"
+          id="popupBackButton"
+          class="popup-icon-button"
           type="button"
-          aria-label="Go back"
+          aria-label="Back"
           title="Back"
         >←</button>
 
-        <div class="page-floating-right">
+        <div class="popup-controls-right">
           <button
-            id="pageEditButton"
-            class="page-icon-button"
+            id="popupEditButton"
+            class="popup-icon-button"
             type="button"
             aria-label="Edit this entry"
             title="Edit"
           >
-            <svg viewBox="0 0 24 24" width="19" height="19"
-              fill="none" stroke="currentColor"
+            <svg
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              fill="none"
+              stroke="currentColor"
               stroke-width="1.5"
               stroke-linecap="round"
-              stroke-linejoin="round">
+              stroke-linejoin="round"
+            >
               <path d="M12 20h9"></path>
               <path d="M16.5 3.5l4 4L9 19H5v-4z"></path>
             </svg>
           </button>
 
           <button
-            id="pageCloseButton"
-            class="page-icon-button"
+            id="popupCloseButton"
+            class="popup-icon-button"
             type="button"
-            aria-label="Return to universe"
-            title="Return to universe"
+            aria-label="Close"
+            title="Close"
           >×</button>
         </div>
       </div>
 
-
-      <!-- FULLY FADING BANNER -->
-      <div
-        id="pageHero"
-        class="page-hero"
-      >
+      <!-- banner / top -->
+      <div class="popup-top">
         <div
-          id="pageBanner"
-          class="page-banner"
+          id="popupBanner"
+          class="popup-banner"
           role="img"
-          aria-label="Archive banner"
+          aria-label="Banner image"
         ></div>
 
-        <div class="page-banner-shade"></div>
-        <div class="page-banner-fade"></div>
+        <div class="popup-banner-glow"></div>
+        <div class="popup-banner-fade"></div>
 
-        <!-- 3D paperclip for production status -->
         <div
-          id="statusPaperclip"
-          class="status-paperclip"
+          id="popupPaperclip"
+          class="popup-paperclip"
           data-status="planned"
           hidden
           aria-label="Watching status"
@@ -203,33 +192,17 @@
             aria-hidden="true"
           >
             <defs>
-              <linearGradient
-                id="clipMetal"
-                x1="0" y1="0" x2="1" y2="1"
-              >
-                <stop offset="0" stop-color="#f2f3f9"/>
-                <stop offset=".18" stop-color="#8589a5"/>
-                <stop offset=".37" stop-color="#eef0f9"/>
-                <stop offset=".63" stop-color="#6f748e"/>
-                <stop offset=".84" stop-color="#d6d9ed"/>
-                <stop offset="1" stop-color="#6a6b83"/>
+              <linearGradient id="clipMetal42" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#f3f4f8" />
+                <stop offset=".18" stop-color="#9093a9" />
+                <stop offset=".36" stop-color="#eff1f8" />
+                <stop offset=".63" stop-color="#70758d" />
+                <stop offset=".85" stop-color="#d8dcef" />
+                <stop offset="1" stop-color="#676b81" />
               </linearGradient>
 
-              <linearGradient
-                id="clipEdge"
-                x1="0" y1="0" x2="1" y2="0"
-              >
-                <stop offset="0" stop-color="#55596e"/>
-                <stop offset=".5" stop-color="#f4f5ff"/>
-                <stop offset="1" stop-color="#797c97"/>
-              </linearGradient>
-
-              <filter
-                id="clipShadow"
-                x="-60%" y="-30%"
-                width="220%" height="190%"
-              >
-                <feGaussianBlur stdDeviation="4"/>
+              <filter id="clipShadow42" x="-60%" y="-30%" width="220%" height="190%">
+                <feGaussianBlur stdDeviation="4" />
               </filter>
             </defs>
 
@@ -245,8 +218,8 @@
               fill="none"
               stroke="#000"
               stroke-width="12"
-              opacity=".36"
-              filter="url(#clipShadow)"
+              opacity=".34"
+              filter="url(#clipShadow42)"
               transform="translate(3 4)"
             />
 
@@ -260,144 +233,77 @@
                  C48 128 51 123 51 117
                  L51 54"
               fill="none"
-              stroke="url(#clipMetal)"
+              stroke="url(#clipMetal42)"
               stroke-width="8"
               stroke-linecap="round"
               stroke-linejoin="round"
             />
 
-            <path
-              d="M42 9 C24 9 14 23 14 43
-                 L14 126 C14 147 27 157 43 155"
-              fill="none"
-              stroke="url(#clipEdge)"
-              stroke-width="2"
-              stroke-linecap="round"
-              opacity=".85"
-            />
-
             <g transform="translate(15 59)">
               <path
                 class="clip-gem"
-                d="M0 -11 L10 -5 L12 6 L0 15
-                   L-12 6 L-10 -5 Z"
-              />
-              <path
-                d="M0 -11 L0 15 M-12 6 L10 -5
-                   M12 6 L-10 -5"
-                fill="none"
-                stroke="#fff"
-                stroke-opacity=".26"
-                stroke-width=".8"
+                d="M0 -11 L10 -5 L12 6 L0 15 L-12 6 L-10 -5 Z"
               />
             </g>
           </svg>
         </div>
       </div>
 
+      <!-- inner popup layout -->
+      <div class="popup-inner">
 
-      <!-- PAGE BODY -->
-      <div class="page-content">
-
-        <header class="page-heading">
-          <div class="page-heading-main">
-            <span
-              id="pageType"
-              class="page-type"
-            ></span>
-
-            <h1 id="pageTitle"></h1>
-
-            <div
-              id="pageRating"
-              class="page-rating"
-              aria-label="Average rating"
-            ></div>
+        <header class="popup-head">
+          <div class="popup-head-left">
+            <span id="popupType" class="popup-type"></span>
+            <h1 id="popupTitle" class="popup-title"></h1>
+            <div id="popupRating" class="popup-rating"></div>
+            <div id="popupSubMeta" class="popup-submeta"></div>
           </div>
 
-          <div
-            id="pageQuickMeta"
-            class="page-quick-meta"
-          ></div>
+          <div class="popup-head-right">
+            <div id="popupMetaPrimary" class="popup-meta-primary"></div>
+            <div id="popupMetaSecondary" class="popup-meta-secondary"></div>
+          </div>
         </header>
 
-
-        <!-- GENRE INFORMATION -->
-        <section
-          class="page-taxonomy"
-          aria-label="Genres"
-        >
-          <div
-            id="pageMainGenres"
-            class="page-main-genres"
-          ></div>
-
-          <div
-            id="pageSecondaryGenres"
-            class="page-secondary-genres"
-          ></div>
+        <section class="popup-notes-section" aria-label="Personal notes">
+          <div id="popupNotes" class="popup-notes"></div>
         </section>
 
-
-        <!-- UNNAMED OBSERVATIONS -->
         <section
-          class="observations"
-          aria-label="Personal observations"
+          id="popupChildrenSection"
+          class="popup-children-section"
+          aria-label="Children"
         >
-          <div
-            id="pageNotes"
-            class="observations-text"
-          ></div>
-        </section>
-
-
-        <!-- CHILD PRODUCTIONS / SEASONS -->
-        <section
-          id="pageChildrenSection"
-          class="page-children-section"
-          aria-label="Contained entries"
-        >
-          <div class="children-heading">
-            <span
-              id="pageChildrenCount"
-              class="children-count"
-            ></span>
+          <div class="popup-children-head">
+            <span id="popupChildrenLabel" class="popup-children-label"></span>
 
             <button
-              id="pageAddChildButton"
-              class="children-add"
+              id="popupAddChildButton"
+              class="popup-add-child"
               type="button"
               aria-label="Add child entry"
             >+</button>
           </div>
 
           <div
-            id="pageChildren"
-            class="page-children"
+            id="popupChildren"
+            class="popup-children"
           ></div>
         </section>
-
-
-        <div class="page-bottom-space"></div>
       </div>
-
-    </article>
+    </section>
   </div>
 
-
-  <!-- =====================================
+  <!-- =========================================
        SEARCH
-  ====================================== -->
-
+  ========================================== -->
   <div
     id="searchOverlay"
     class="overlay search-overlay"
     aria-hidden="true"
   >
-    <div
-      id="searchBackdrop"
-      class="overlay-backdrop"
-    ></div>
+    <div id="searchBackdrop" class="overlay-backdrop"></div>
 
     <section
       class="search-panel"
@@ -417,10 +323,7 @@
         >×</button>
       </div>
 
-      <label
-        for="globalSearch"
-        class="visually-hidden"
-      >Search titles</label>
+      <label for="globalSearch" class="visually-hidden">Search titles</label>
 
       <input
         id="globalSearch"
@@ -429,30 +332,21 @@
         placeholder="Search your universe..."
         autocomplete="off"
         spellcheck="false"
-      >
+      />
 
-      <div
-        id="searchResults"
-        class="search-results"
-        aria-live="polite"
-      ></div>
+      <div id="searchResults" class="search-results" aria-live="polite"></div>
     </section>
   </div>
 
-
-  <!-- =====================================
-       LIBRARY / SETTINGS / GENRES
-  ====================================== -->
-
+  <!-- =========================================
+       DETAIL / LIBRARY / SETTINGS SHEET
+  ========================================== -->
   <div
     id="detailOverlay"
     class="overlay detail-overlay"
     aria-hidden="true"
   >
-    <div
-      id="detailBackdrop"
-      class="overlay-backdrop"
-    ></div>
+    <div id="detailBackdrop" class="overlay-backdrop"></div>
 
     <section
       id="detailSheet"
@@ -469,27 +363,19 @@
         aria-label="Close panel"
       >×</button>
 
-      <div
-        id="detailContent"
-        class="detail-content"
-      ></div>
+      <div id="detailContent" class="detail-content"></div>
     </section>
   </div>
 
-
-  <!-- =====================================
-       CREATE & EDIT
-  ====================================== -->
-
+  <!-- =========================================
+       CREATE / EDIT
+  ========================================== -->
   <div
     id="editorOverlay"
     class="overlay editor-overlay"
     aria-hidden="true"
   >
-    <div
-      id="editorBackdrop"
-      class="overlay-backdrop"
-    ></div>
+    <div id="editorBackdrop" class="overlay-backdrop"></div>
 
     <section
       id="editorSheet"
@@ -501,11 +387,7 @@
     >
       <div class="editor-header">
         <div>
-          <span
-            id="editorEyebrow"
-            class="panel-eyebrow"
-          >YOUR ARCHIVE</span>
-
+          <span id="editorEyebrow" class="panel-eyebrow">YOUR ARCHIVE</span>
           <h2 id="editorTitle">Create & Edit</h2>
         </div>
 
@@ -517,32 +399,33 @@
         >×</button>
       </div>
 
-      <div
-        id="editorContent"
-        class="editor-content"
-      ></div>
+      <div id="editorContent" class="editor-content"></div>
     </section>
   </div>
 
-
-  <!-- =====================================
-       IMAGE UPLOAD PREVIEW
-
-       Selection from phone gallery.
-  ====================================== -->
-
+  <!-- =========================================
+       BANNER GALLERY FILE INPUT
+  ========================================== -->
   <input
     id="bannerFileInput"
     type="file"
     accept="image/*"
     hidden
-  >
+  />
 
+  <!-- =========================================
+       IMPORT FILE
+  ========================================== -->
+  <input
+    id="importFile"
+    type="file"
+    accept=".json,application/json"
+    hidden
+  />
 
-  <!-- =====================================
-       DELETION CONFIRMATION
-  ====================================== -->
-
+  <!-- =========================================
+       CONFIRMATION
+  ========================================== -->
   <div
     id="confirmOverlay"
     class="overlay confirm-overlay"
@@ -558,42 +441,23 @@
       aria-describedby="confirmMessage"
     >
       <h2 id="confirmTitle">Are you sure?</h2>
-
       <p id="confirmMessage"></p>
 
       <div class="confirm-actions">
-        <button
-          id="cancelConfirmButton"
-          class="soft-button"
-          type="button"
-        >Cancel</button>
+        <button id="cancelConfirmButton" class="soft-button" type="button">
+          Cancel
+        </button>
 
-        <button
-          id="acceptConfirmButton"
-          class="soft-button danger-button"
-          type="button"
-        >Delete</button>
+        <button id="acceptConfirmButton" class="soft-button danger-button" type="button">
+          Delete
+        </button>
       </div>
     </section>
   </div>
 
-
-  <!-- =====================================
-       BACKUP IMPORT
-  ====================================== -->
-
-  <input
-    id="importFile"
-    type="file"
-    accept=".json,application/json"
-    hidden
-  >
-
-
-  <!-- =====================================
-       NOTIFICATIONS
-  ====================================== -->
-
+  <!-- =========================================
+       TOAST
+  ========================================== -->
   <div
     id="toast"
     class="toast"
