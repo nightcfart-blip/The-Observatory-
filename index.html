@@ -1,38 +1,43 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-  />
-  <meta name="theme-color" content="#02040b" />
-  <meta name="color-scheme" content="dark" />
-  <meta
-    name="description"
-    content="A private celestial archive of films, series, seasons and episodes."
-  />
+  <meta charset="UTF-8">
+
+  <meta name="viewport"
+    content="width=device-width,initial-scale=1,viewport-fit=cover">
+
+  <meta name="theme-color" content="#02040b">
+  <meta name="color-scheme" content="dark">
+
+  <meta name="description"
+    content="A personal celestial archive of movies, series, seasons and episodes.">
 
   <title>Watch Archive — Universe</title>
 
-  <!-- nicer typography -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect"
+    href="https://fonts.googleapis.com">
+
+  <link rel="preconnect"
+    href="https://fonts.gstatic.com"
+    crossorigin>
+
   <link
     href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap"
-    rel="stylesheet"
-  />
+    rel="stylesheet">
 
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./style.css">
 
   <script src="./data.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
+
 <body>
 
-  <!-- =========================================
-       BACKGROUND / UNIVERSE
-  ========================================== -->
+  <!-- ====================================
+       STARFIELD
+  ===================================== -->
+
   <div class="universe" aria-hidden="true">
     <div class="space-base"></div>
     <canvas id="nebulaCanvas"></canvas>
@@ -40,169 +45,190 @@
     <div class="space-vignette"></div>
   </div>
 
-  <!-- =========================================
-       MAIN MOVABLE VIEWPORT
-  ========================================== -->
+  <!-- ====================================
+       CONTINUOUS WORLD
+  ===================================== -->
+
   <main
     id="viewport"
     class="viewport"
     tabindex="0"
-    aria-label="Explore your archive universe"
-  >
+    aria-label="Explore your archive universe">
+
     <canvas
       id="constellationCanvas"
       class="constellation-canvas"
-      aria-hidden="true"
-    ></canvas>
+      aria-hidden="true">
+    </canvas>
 
     <div
       id="starLayer"
       class="star-layer"
-      aria-label="Interactive archive constellation"
-    ></div>
+      aria-label="Interactive constellations">
+    </div>
   </main>
 
-  <!-- =========================================
-       MINIMAL UNIVERSE CONTROLS
-  ========================================== -->
-  <nav class="universe-controls" aria-label="Universe controls">
+  <!-- ====================================
+       UNIVERSE CONTROLS
+  ===================================== -->
+
+  <nav class="universe-controls"
+    aria-label="Universe controls">
+
     <button
       id="homeButton"
       class="minimal-control"
       type="button"
       aria-label="Return to main constellation"
-      title="Main constellation"
-    >✧</button>
+      title="Main constellation">✧</button>
 
     <button
       id="focusButton"
       class="minimal-control"
       type="button"
-      aria-label="Focus on current selection"
-      title="Focus selection"
-    >⌾</button>
+      aria-label="Focus selected star"
+      title="Focus">⌾</button>
 
     <button
       id="searchButton"
       class="minimal-control"
       type="button"
       aria-label="Search archive"
-      title="Search archive"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        width="18"
-        height="18"
+      title="Search">
+
+      <svg viewBox="0 0 24 24"
+        width="18" height="18"
         fill="none"
         stroke="currentColor"
-        stroke-width="1.55"
-        stroke-linecap="round"
-      >
-        <circle cx="10.5" cy="10.5" r="6.5"></circle>
-        <path d="M15.5 15.5L21 21"></path>
+        stroke-width="1.5"
+        stroke-linecap="round">
+        <circle cx="10.5" cy="10.5" r="6.5"/>
+        <path d="M15.5 15.5L21 21"/>
       </svg>
+
     </button>
+
   </nav>
 
-  <!-- =========================================
-       POPUP DETAIL OVERLAY (STEP 4.2)
-       This replaces the "distinctive page" feeling.
-  ========================================== -->
+  <!-- ====================================
+       UNIVERSAL ARCHIVE POPUP
+
+       Group / Production / Season / Episode
+
+       JavaScript sets:
+       data-entry-type="group|production|season|episode"
+
+       The popup does not scroll.
+  ===================================== -->
+
   <div
     id="popupOverlay"
     class="popup-overlay"
-    aria-hidden="true"
-  >
-    <div id="popupBackdrop" class="popup-backdrop"></div>
+    aria-hidden="true">
+
+    <div
+      id="popupBackdrop"
+      class="popup-backdrop">
+    </div>
 
     <section
       id="archivePopup"
       class="archive-popup"
+      data-entry-type="group"
       role="dialog"
       aria-modal="true"
       aria-labelledby="popupTitle"
-      tabindex="-1"
-    >
-      <!-- floating controls -->
+      tabindex="-1">
+
+      <!-- FLOATING ACTIONS -->
+
       <div class="popup-controls">
+
         <button
           id="popupBackButton"
           class="popup-icon-button"
           type="button"
-          aria-label="Back"
-          title="Back"
-        >←</button>
+          aria-label="Previous archive entry"
+          title="Back">←</button>
 
         <div class="popup-controls-right">
+
           <button
             id="popupEditButton"
             class="popup-icon-button"
             type="button"
-            aria-label="Edit this entry"
-            title="Edit"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="18"
-              height="18"
+            aria-label="Edit entry"
+            title="Edit">
+
+            <svg viewBox="0 0 24 24"
+              width="18" height="18"
               fill="none"
               stroke="currentColor"
               stroke-width="1.5"
               stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M12 20h9"></path>
-              <path d="M16.5 3.5l4 4L9 19H5v-4z"></path>
+              stroke-linejoin="round">
+              <path d="M12 20h9"/>
+              <path d="M16.5 3.5l4 4L9 19H5v-4z"/>
             </svg>
+
           </button>
 
           <button
             id="popupCloseButton"
             class="popup-icon-button"
             type="button"
-            aria-label="Close"
-            title="Close"
-          >×</button>
+            aria-label="Close popup"
+            title="Close">×</button>
+
         </div>
       </div>
 
-      <!-- banner / top -->
+      <!-- ATMOSPHERIC IMAGE BANNER -->
+
       <div class="popup-top">
+
         <div
           id="popupBanner"
           class="popup-banner"
           role="img"
-          aria-label="Banner image"
-        ></div>
+          aria-label="Entry banner image">
+        </div>
 
         <div class="popup-banner-glow"></div>
         <div class="popup-banner-fade"></div>
+
+        <!-- STATUS ORNAMENT -->
 
         <div
           id="popupPaperclip"
           class="popup-paperclip"
           data-status="planned"
           hidden
-          aria-label="Watching status"
-        >
+          aria-label="Watching status">
+
           <svg
             class="paperclip-svg"
             viewBox="0 0 82 166"
             xmlns="http://www.w3.org/2000/svg"
-            aria-hidden="true"
-          >
+            aria-hidden="true">
+
             <defs>
-              <linearGradient id="clipMetal42" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#f3f4f8" />
-                <stop offset=".18" stop-color="#9093a9" />
-                <stop offset=".36" stop-color="#eff1f8" />
-                <stop offset=".63" stop-color="#70758d" />
-                <stop offset=".85" stop-color="#d8dcef" />
-                <stop offset="1" stop-color="#676b81" />
+              <linearGradient
+                id="clipMetalStep5"
+                x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#f3f4f8"/>
+                <stop offset=".18" stop-color="#9297ae"/>
+                <stop offset=".37" stop-color="#f2f3fa"/>
+                <stop offset=".63" stop-color="#686e89"/>
+                <stop offset=".86" stop-color="#d8dcef"/>
+                <stop offset="1" stop-color="#696b81"/>
               </linearGradient>
 
-              <filter id="clipShadow42" x="-60%" y="-30%" width="220%" height="190%">
-                <feGaussianBlur stdDeviation="4" />
+              <filter
+                id="clipShadowStep5"
+                x="-60%" y="-30%"
+                width="220%" height="190%">
+                <feGaussianBlur stdDeviation="4"/>
               </filter>
             </defs>
 
@@ -219,9 +245,8 @@
               stroke="#000"
               stroke-width="12"
               opacity=".34"
-              filter="url(#clipShadow42)"
-              transform="translate(3 4)"
-            />
+              filter="url(#clipShadowStep5)"
+              transform="translate(3 4)"/>
 
             <path
               d="M42 9 C24 9 14 23 14 43
@@ -233,85 +258,176 @@
                  C48 128 51 123 51 117
                  L51 54"
               fill="none"
-              stroke="url(#clipMetal42)"
+              stroke="url(#clipMetalStep5)"
               stroke-width="8"
               stroke-linecap="round"
-              stroke-linejoin="round"
-            />
+              stroke-linejoin="round"/>
 
             <g transform="translate(15 59)">
               <path
                 class="clip-gem"
-                d="M0 -11 L10 -5 L12 6 L0 15 L-12 6 L-10 -5 Z"
-              />
+                d="M0 -11 L10 -5 L12 6 L0 15
+                   L-12 6 L-10 -5 Z"/>
+
+              <path
+                d="M0 -11L0 15M-12 6L10 -5M12 6L-10 -5"
+                fill="none"
+                stroke="#fff"
+                stroke-opacity=".25"
+                stroke-width=".8"/>
             </g>
+
           </svg>
         </div>
+
       </div>
 
-      <!-- inner popup layout -->
+      <!-- FIXED POPUP CONTENT -->
+
       <div class="popup-inner">
 
+        <!-- TITLE / RATING / DETAILS -->
+
         <header class="popup-head">
+
           <div class="popup-head-left">
-            <span id="popupType" class="popup-type"></span>
-            <h1 id="popupTitle" class="popup-title"></h1>
-            <div id="popupRating" class="popup-rating"></div>
-            <div id="popupSubMeta" class="popup-submeta"></div>
+
+            <span
+              id="popupType"
+              class="popup-type">
+            </span>
+
+            <h1
+              id="popupTitle"
+              class="popup-title">
+            </h1>
+
+            <div
+              id="popupRating"
+              class="popup-rating"
+              aria-label="Rating">
+            </div>
+
+            <div
+              id="popupSubMeta"
+              class="popup-submeta">
+            </div>
+
           </div>
 
           <div class="popup-head-right">
-            <div id="popupMetaPrimary" class="popup-meta-primary"></div>
-            <div id="popupMetaSecondary" class="popup-meta-secondary"></div>
+
+            <div
+              id="popupMetaPrimary"
+              class="popup-meta-primary">
+            </div>
+
+            <div
+              id="popupMetaSecondary"
+              class="popup-meta-secondary">
+            </div>
+
           </div>
+
         </header>
 
-        <section class="popup-notes-section" aria-label="Personal notes">
-          <div id="popupNotes" class="popup-notes"></div>
+        <!-- OPTIONAL SMALL STATUS / DURATION STRIP
+             Used especially for seasons and episodes. -->
+
+        <div
+          id="popupDetailStrip"
+          class="popup-detail-strip"
+          hidden>
+        </div>
+
+        <!-- PERSONAL OBSERVATIONS:
+             NO VISIBLE FIELD HEADING -->
+
+        <section
+          id="popupNotesSection"
+          class="popup-notes-section"
+          aria-label="Personal observations">
+
+          <div
+            id="popupNotes"
+            class="popup-notes">
+          </div>
+
         </section>
+
+        <!-- CHILD COLLECTION:
+             ONLY THIS SCROLLS -->
 
         <section
           id="popupChildrenSection"
           class="popup-children-section"
-          aria-label="Children"
-        >
+          aria-label="Child entries">
+
           <div class="popup-children-head">
-            <span id="popupChildrenLabel" class="popup-children-label"></span>
+
+            <span
+              id="popupChildrenLabel"
+              class="popup-children-label">
+            </span>
 
             <button
               id="popupAddChildButton"
               class="popup-add-child"
               type="button"
-              aria-label="Add child entry"
-            >+</button>
+              aria-label="Add an entry">+</button>
+
           </div>
 
           <div
             id="popupChildren"
-            class="popup-children"
-          ></div>
+            class="popup-children">
+          </div>
+
         </section>
+
+        <!-- Episode-only actions:
+             no child images or child list -->
+
+        <div
+          id="popupEpisodeActions"
+          class="popup-episode-actions"
+          hidden>
+
+          <button
+            id="popupEpisodeEditButton"
+            class="popup-episode-edit"
+            type="button">
+            Edit episode
+          </button>
+
+        </div>
+
       </div>
+
     </section>
   </div>
 
-  <!-- =========================================
-       SEARCH
-  ========================================== -->
+  <!-- ====================================
+       SEARCH OVERLAY
+  ===================================== -->
+
   <div
     id="searchOverlay"
     class="overlay search-overlay"
-    aria-hidden="true"
-  >
-    <div id="searchBackdrop" class="overlay-backdrop"></div>
+    aria-hidden="true">
+
+    <div
+      id="searchBackdrop"
+      class="overlay-backdrop">
+    </div>
 
     <section
       class="search-panel"
       role="dialog"
       aria-modal="true"
       aria-labelledby="searchHeading"
-      tabindex="-1"
-    >
+      tabindex="-1">
+
       <div class="panel-topline">
         <h2 id="searchHeading">Find a story</h2>
 
@@ -319,11 +435,14 @@
           id="closeSearchButton"
           class="close-button"
           type="button"
-          aria-label="Close search"
-        >×</button>
+          aria-label="Close search">×</button>
       </div>
 
-      <label for="globalSearch" class="visually-hidden">Search titles</label>
+      <label
+        for="globalSearch"
+        class="visually-hidden">
+        Search titles
+      </label>
 
       <input
         id="globalSearch"
@@ -331,22 +450,30 @@
         type="search"
         placeholder="Search your universe..."
         autocomplete="off"
-        spellcheck="false"
-      />
+        spellcheck="false">
 
-      <div id="searchResults" class="search-results" aria-live="polite"></div>
+      <div
+        id="searchResults"
+        class="search-results"
+        aria-live="polite">
+      </div>
+
     </section>
   </div>
 
-  <!-- =========================================
-       DETAIL / LIBRARY / SETTINGS SHEET
-  ========================================== -->
+  <!-- ====================================
+       LIBRARY / GENRES / SETTINGS
+  ===================================== -->
+
   <div
     id="detailOverlay"
     class="overlay detail-overlay"
-    aria-hidden="true"
-  >
-    <div id="detailBackdrop" class="overlay-backdrop"></div>
+    aria-hidden="true">
+
+    <div
+      id="detailBackdrop"
+      class="overlay-backdrop">
+    </div>
 
     <section
       id="detailSheet"
@@ -354,28 +481,35 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="detailTitle"
-      tabindex="-1"
-    >
+      tabindex="-1">
+
       <button
         id="closeDetailButton"
         class="close-button detail-close"
         type="button"
-        aria-label="Close panel"
-      >×</button>
+        aria-label="Close panel">×</button>
 
-      <div id="detailContent" class="detail-content"></div>
+      <div
+        id="detailContent"
+        class="detail-content">
+      </div>
+
     </section>
   </div>
 
-  <!-- =========================================
-       CREATE / EDIT
-  ========================================== -->
+  <!-- ====================================
+       ARCHIVE EDITOR
+  ===================================== -->
+
   <div
     id="editorOverlay"
     class="overlay editor-overlay"
-    aria-hidden="true"
-  >
-    <div id="editorBackdrop" class="overlay-backdrop"></div>
+    aria-hidden="true">
+
+    <div
+      id="editorBackdrop"
+      class="overlay-backdrop">
+    </div>
 
     <section
       id="editorSheet"
@@ -383,11 +517,17 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="editorTitle"
-      tabindex="-1"
-    >
+      tabindex="-1">
+
       <div class="editor-header">
+
         <div>
-          <span id="editorEyebrow" class="panel-eyebrow">YOUR ARCHIVE</span>
+          <span
+            id="editorEyebrow"
+            class="panel-eyebrow">
+            YOUR ARCHIVE
+          </span>
+
           <h2 id="editorTitle">Create & Edit</h2>
         </div>
 
@@ -395,42 +535,47 @@
           id="closeEditorButton"
           class="close-button"
           type="button"
-          aria-label="Close editor"
-        >×</button>
+          aria-label="Close editor">×</button>
+
       </div>
 
-      <div id="editorContent" class="editor-content"></div>
+      <div
+        id="editorContent"
+        class="editor-content">
+      </div>
+
     </section>
   </div>
 
-  <!-- =========================================
-       BANNER GALLERY FILE INPUT
-  ========================================== -->
+  <!-- ====================================
+       PHONE GALLERY INPUT
+  ===================================== -->
+
   <input
     id="bannerFileInput"
     type="file"
     accept="image/*"
-    hidden
-  />
+    hidden>
 
-  <!-- =========================================
-       IMPORT FILE
-  ========================================== -->
+  <!-- ====================================
+       JSON BACKUP IMPORT
+  ===================================== -->
+
   <input
     id="importFile"
     type="file"
     accept=".json,application/json"
-    hidden
-  />
+    hidden>
 
-  <!-- =========================================
-       CONFIRMATION
-  ========================================== -->
+  <!-- ====================================
+       DESTRUCTIVE ACTION CONFIRMATION
+  ===================================== -->
+
   <div
     id="confirmOverlay"
     class="overlay confirm-overlay"
-    aria-hidden="true"
-  >
+    aria-hidden="true">
+
     <div class="overlay-backdrop"></div>
 
     <section
@@ -438,32 +583,43 @@
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="confirmTitle"
-      aria-describedby="confirmMessage"
-    >
+      aria-describedby="confirmMessage">
+
       <h2 id="confirmTitle">Are you sure?</h2>
+
       <p id="confirmMessage"></p>
 
       <div class="confirm-actions">
-        <button id="cancelConfirmButton" class="soft-button" type="button">
+
+        <button
+          id="cancelConfirmButton"
+          class="soft-button"
+          type="button">
           Cancel
         </button>
 
-        <button id="acceptConfirmButton" class="soft-button danger-button" type="button">
+        <button
+          id="acceptConfirmButton"
+          class="soft-button danger-button"
+          type="button">
           Delete
         </button>
+
       </div>
+
     </section>
   </div>
 
-  <!-- =========================================
-       TOAST
-  ========================================== -->
+  <!-- ====================================
+       NOTIFICATIONS
+  ===================================== -->
+
   <div
     id="toast"
     class="toast"
     role="status"
-    aria-live="polite"
-  ></div>
+    aria-live="polite">
+  </div>
 
 </body>
 </html>
