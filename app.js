@@ -1,2675 +1,1338 @@
 
 "use strict";
 
-/* ==========================================================
-   WATCH ARCHIVE — STEP 3
-   GROUPS, HIERARCHY & MANUAL GENRES
-
-   Four-level editable archive
-   Stable IDs and parent relationships
-   Genre creation and assignment
-   Natural constellation stars
-   Continuous free-moving camera
-   Local autosaving and JSON backups
-========================================================== */
-
+/* WATCH ARCHIVE — STEP 4
+   Complete replacement app.js
+   No frameworks, server or external dependencies.
+*/
 (() => {
-  const DATA = window.WATCH_DATA;
-  if (!DATA) {
-    console.error("Missing data.js");
-    return;
-  }
+  const D = window.WATCH_DATA;
+  if (!D) return console.error("data.js missing");
 
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
-  const clone = x => JSON.parse(JSON.stringify(x));
-  const clamp = (x,a,b) => Math.max(a,Math.min(b,x));
-  const lerp = (a,b,t) => a+(b-a)*t;
-  const smooth = (a,b,x) => {
-    const t = clamp((x-a)/(b-a),0,1);
-    return t*t*(3-2*t);
+  const copy = o => JSON.parse(JSON.stringify(o));
+  const clamp = (n,a,b) => Math.max(a,Math.min(b,n));
+  const mix = (a,b,t) => a+(b-a)*t;
+  const ease = t => t*t*(3-2*t);
+  const esc = s => String(s??"").replace(/[&<>"']/g,c=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  })[c]);
+  const id = () => crypto.randomUUID?.() ||
+    `wa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const hash = s => {
+    let h=2166136261;
+    for(const c of String(s)){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}
+    return h>>>0;
   };
-
-  const viewport = $("#viewport");
-  const starLayer = $("#starLayer");
-  const detailOverlay = $("#detailOverlay");
-  const editorOverlay = $("#editorOverlay");
-  const searchOverlay = $("#searchOverlay");
-  const confirmOverlay = $("#confirmOverlay");
-
-  const reduceMedia = matchMedia(
-    "(prefers-reduced-motion: reduce)"
-  );
-
-  const TYPES = ["group","production","season","episode"];
-
-  const COLLECTIONS = {
-    group: "groups",
-    production: "productions",
-    season: "seasons",
-    episode: "episodes"
-  };
-
-  const PARENT_KEYS = {
-    production: "groupId",
-    season: "productionId",
-    episode: "seasonId"
-  };
-
-  let state = loadState();
-  let nodes = [];
-  let edges = [];
-  let nodeMap = new Map();
-
-  let width = innerWidth;
-  let height = innerHeight;
-  let dpr = 1;
-
-  let selectedNode = null;
-  let focusedNode = null;
-  let currentOverlay = null;
-  let oldFocus = null;
-  let confirmCallback = null;
-  let toastTimer = 0;
-
-  let dirty = true;
-  let running = false;
-  let frameHandle = 0;
-  let lastFrame = 0;
-  let quality = 1;
-
-  const camera = {x:0,y:0,zoom:1};
-  let travel = null;
-
-  const pointers = new Map();
-  let gesture = null;
-  let blockClickUntil = 0;
-
-  let managerView = {type:null,id:null};
-  let activeCollection = "library";
-  let filters = {};
-
-  const canvas = $("#constellationCanvas");
-  const ctx = canvas.getContext("2d");
-
-  const bgCanvas = $("#backgroundStars");
-  const bgCtx = bgCanvas.getContext("2d");
-
-  const nebulaCanvas = $("#nebulaCanvas");
-  const nebulaCtx = nebulaCanvas.getContext("2d");
-
-  let backgroundStars = [];
-  let nebulaTexture = null;
-
-  /* ======================================================
-     UTILITIES
-  ====================================================== */
-
-  function uid() {
-    if (crypto.randomUUID) return crypto.randomUUID();
-
-    return "wa-" + Date.now().toString(36) + "-" +
-      Math.random().toString(36).slice(2,11);
-  }
-
-  function hash(value) {
-    let h = 2166136261;
-    for (const char of String(value)) {
-      h ^= char.charCodeAt(0);
-      h = Math.imul(h,16777619);
-    }
-    return h >>> 0;
-  }
-
-  function random(seed) {
-    let t = seed + 0x6D2B79F5;
-    t = Math.imul(t^(t>>>15),t|1);
-    t ^= t + Math.imul(t^(t>>>7),t|61);
+  const rnd = s => {
+    let t=s+0x6D2B79F5;
+    t=Math.imul(t^(t>>>15),t|1);
+    t^=t+Math.imul(t^(t>>>7),t|61);
     return ((t^(t>>>14))>>>0)/4294967296;
+  };
+  const title = e => e?.title||e?.name||"Untitled";
+  const dateNumber = x => x ? (Date.parse(x)||0) : 0;
+  const types = ["group","production","season","episode"];
+  const lists = {group:"groups",production:"productions",season:"seasons",episode:"episodes"};
+  const parents = {production:"groupId",season:"productionId",episode:"seasonId"};
+  const nextType = {group:"production",production:"season",season:"episode"};
+
+  let state, nodes=[], edges=[], byId=new Map(), selected=null, focused=null;
+  let camera={x:0,y:0,z:1}, flight=null, page=null, pageStack=[];
+  let overlay=null, previousFocus=null, confirmCallback=null, toastTimeout;
+  let editorContext=null, pendingImage=null, previewURL=null, pageImageURL=null;
+  let imageCache=new Map(), width=innerWidth,height=innerHeight,ratio=1;
+  let dust=[], nebulaTexture=null, running=false, frame=0,lastFrame=0;
+  let dirty=true, starsFrame=0;
+  const pointers=new Map();
+  let gesture=null, suppressUntil=0, hovered=null;
+  let collectionType="library", filters={};
+  const reducedQuery=matchMedia("(prefers-reduced-motion: reduce)");
+  const viewport=$("#viewport"), starLayer=$("#starLayer");
+  const cv=$("#constellationCanvas"), ctx=cv.getContext("2d");
+  const bg=$("#backgroundStars"), bctx=bg.getContext("2d");
+  const nc=$("#nebulaCanvas"), nctx=nc.getContext("2d");
+  const pageEl=$("#pageOverlay"), editorEl=$("#editorOverlay");
+  const detailEl=$("#detailOverlay"), searchEl=$("#searchOverlay");
+  const confirmEl=$("#confirmOverlay");
+
+  function toast(text){
+    const el=$("#toast");el.textContent=text;el.classList.add("show");
+    clearTimeout(toastTimeout);
+    toastTimeout=setTimeout(()=>el.classList.remove("show"),3000);
   }
-
-  function escapeHTML(value) {
-    return String(value ?? "").replace(
-      /[&<>"']/g,
-      c => ({
-        "&":"&amp;",
-        "<":"&lt;",
-        ">":"&gt;",
-        '"':"&quot;",
-        "'":"&#39;"
-      })[c]
-    );
+  function motion(){return state.settings.reduceMotion||reducedQuery.matches;}
+  function updateMotion(){document.body.classList.toggle("reduce-motion",motion());dirty=true;}
+  function defaults(){
+    const now=new Date().toISOString();
+    return {schemaVersion:D.schemaVersion,createdAt:now,updatedAt:now,
+      settings:copy(D.defaults.settings),archive:copy(D.defaults.archive)};
   }
-
-  function dateValue(value) {
-    if (!value) return 0;
-    const n = new Date(value).getTime();
-    return Number.isFinite(n) ? n : 0;
+  function normalize(v){
+    const s=defaults(),a=v?.archive||{};
+    return {...s,...v,schemaVersion:D.schemaVersion,
+      settings:{...s.settings,...v?.settings},
+      archive:{...s.archive,...a,...Object.fromEntries(
+        [...Object.values(lists),"genres","secondaryGenres"].map(k=>
+          [k,Array.isArray(a[k])?a[k]:[]]))}};
   }
-
-  function safeNumber(value, fallback, min, max) {
-    if (value === "" || value == null) return fallback;
-    const n = Number(value);
-    return Number.isFinite(n) ? clamp(n,min,max) : fallback;
+  function load(){
+    try{
+      const v=JSON.parse(localStorage.getItem(D.storageKey)||"null");
+      return v?.schemaVersion===D.schemaVersion?normalize(v):defaults();
+    }catch(e){console.error(e);return defaults();}
   }
-
-  function titleOf(item) {
-    return String(item?.title || item?.name || "Untitled");
+  function save(){
+    state.updatedAt=new Date().toISOString();
+    try{localStorage.setItem(D.storageKey,JSON.stringify(state));return true;}
+    catch(e){console.error(e);toast("Local storage is full or unavailable.");return false;}
   }
-
-  function notify(message) {
-    const el = $("#toast");
-    el.textContent = message;
-    el.classList.add("show");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove("show"),3100);
-  }
-
-  function reduced() {
-    return state.settings.reduceMotion || reduceMedia.matches;
-  }
-
-  function applyMotion() {
-    document.body.classList.toggle("reduce-motion",reduced());
-    dirty = true;
-  }
-
-  /* ======================================================
-     STORAGE
-  ====================================================== */
-
-  function initialState() {
-    const now = new Date().toISOString();
-    return {
-      schemaVersion: DATA.schemaVersion,
-      createdAt: now,
-      updatedAt: now,
-      settings: clone(DATA.defaults.settings),
-      archive: clone(DATA.defaults.archive)
-    };
-  }
-
-  function normalizeState(input) {
-    const base = initialState();
-    const a = input?.archive || {};
-    const s = input?.settings || {};
-
-    const archive = {...a};
-
-    for (const type of TYPES) {
-      const key = COLLECTIONS[type];
-      archive[key] = Array.isArray(a[key]) ? a[key] : [];
+  function commit(message){
+    if(!save())return false;
+    buildWorld();
+    if(page && !page.demo){
+      const r=find(page.type,page.id);
+      if(r)openPage(page.type,page.id,{replace:true});
+      else closePage();
     }
-
-    archive.genres = Array.isArray(a.genres) ? a.genres : [];
-    archive.secondaryGenres = Array.isArray(a.secondaryGenres)
-      ? a.secondaryGenres : [];
-
-    return {
-      ...base,
-      ...(input || {}),
-      schemaVersion: DATA.schemaVersion,
-      settings: {
-        ...base.settings,
-        ...s,
-        starDensity: safeNumber(s.starDensity,75,10,100),
-        starBrightness: safeNumber(s.starBrightness,60,10,100),
-        nebulaIntensity: safeNumber(s.nebulaIntensity,65,0,100),
-        constellationGlow: safeNumber(s.constellationGlow,65,0,100),
-        reduceMotion: s.reduceMotion === true
-      },
-      archive
-    };
-  }
-
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(DATA.storageKey);
-      if (!raw) return initialState();
-      const data = JSON.parse(raw);
-
-      if (data.schemaVersion !== DATA.schemaVersion) {
-        console.warn("Storage schema mismatch. Original data retained.");
-        return initialState();
-      }
-
-      return normalizeState(data);
-    } catch(e) {
-      console.error("Storage read failed",e);
-      return initialState();
-    }
-  }
-
-  function saveState() {
-    state.updatedAt = new Date().toISOString();
-
-    try {
-      localStorage.setItem(DATA.storageKey,JSON.stringify(state));
-      return true;
-    } catch(e) {
-      console.error("Storage write failed",e);
-      notify("Saving failed. Export or free browser storage.");
-      return false;
-    }
-  }
-
-  function commitChange(message) {
-    if (!saveState()) return false;
-    rebuildUniverse();
-    dirty = true;
-    if (message) notify(message);
+    if(message)toast(message);
     return true;
   }
-
-  /* ======================================================
-     ENTITY RELATIONSHIPS
-  ====================================================== */
-
-  function collection(type) {
-    return state.archive[COLLECTIONS[type]] || [];
+  function collection(t){return state.archive[lists[t]]||[];}
+  function find(t,key){return collection(t).find(x=>String(x.id)===String(key))||null;}
+  function children(t,key){
+    const child=nextType[t];if(!child)return [];
+    const field=parents[child];
+    return collection(child).filter(e=>String(e[field]||e.parentId||"")===String(key))
+      .sort((a,b)=>(a.order??0)-(b.order??0)||title(a).localeCompare(title(b)));
+  }
+  function parentName(t,item){
+    const p={production:"group",season:"production",episode:"season"}[t];
+    return p?title(find(p,item[parents[t]])):"";
+  }
+  function order(t,parent){
+    return collection(t).filter(e=>!parents[t]||
+      String(e[parents[t]]||"")===String(parent||""))
+      .reduce((m,e)=>Math.max(m,Number(e.order)||0),-1)+1;
+  }
+  function genreList(t){return state.archive[t==="main"?"genres":"secondaryGenres"];}
+  function genreNames(record,kind){
+    return (record[kind==="main"?"mainGenreIds":"secondaryGenreIds"]||[])
+      .map(key=>genreList(kind).find(g=>g.id===key)?.name).filter(Boolean);
   }
 
-  function getEntity(type,id) {
-    return collection(type).find(
-      item => String(item.id) === String(id)
-    ) || null;
-  }
-
-  function childrenOf(type,id) {
-    const next = {
-      group:"production",
-      production:"season",
-      season:"episode"
-    }[type];
-
-    if (!next) return [];
-
-    const key = PARENT_KEYS[next];
-
-    return collection(next).filter(
-      item => String(item[key] || item.parentId || "") === String(id)
-    );
-  }
-
-  function parentOf(type,item) {
-    if (type === "group") return null;
-
-    const key = PARENT_KEYS[type];
-    const parentId = item[key] || item.parentId;
-    if (!parentId) return null;
-
-    const parentType = {
-      production:"group",
-      season:"production",
-      episode:"season"
-    }[type];
-
-    const parent = getEntity(parentType,parentId);
-    return parent ? {type:parentType,item:parent} : null;
-  }
-
-  function nextOrder(type,parentId = null) {
-    let siblings = collection(type);
-
-    if (type !== "group") {
-      const key = PARENT_KEYS[type];
-      siblings = siblings.filter(
-        item => String(item[key] || "") === String(parentId || "")
-      );
-    }
-
-    return siblings.reduce(
-      (max,item) => Math.max(max,Number(item.order) || 0),
-      -1
-    )+1;
-  }
-
-  function sortedChildren(type,parentId) {
-    return childrenOf(type,parentId).sort(
-      (a,b) => (a.order ?? 0)-(b.order ?? 0) ||
-        titleOf(a).localeCompare(titleOf(b))
-    );
-  }
-
-  function isFilm(item) {
-    return [
-      "Movie","Short Film","Special","Documentary"
-    ].includes(item.mediaType);
-  }
-
-  /* ======================================================
-     CUSTOM GENRES
-  ====================================================== */
-
-  function genreCollection(type) {
-    return state.archive[
-      type === "secondary" ? "secondaryGenres" : "genres"
-    ];
-  }
-
-  function genreName(id,type) {
-    return genreCollection(type).find(
-      g => g.id === id
-    )?.name || "";
-  }
-
-  function createGenre(type,name) {
-    const list = genreCollection(type);
-    const clean = name.trim();
-
-    if (!clean) return false;
-
-    if (list.some(g =>
-      g.name.toLowerCase() === clean.toLowerCase()
-    )) {
-      notify("That genre already exists.");
-      return false;
-    }
-
-    list.push({
-      id:uid(),
-      name:clean,
-      createdAt:new Date().toISOString()
+  /* IndexedDB: banner blobs stay on the phone, not in source code. */
+  const imageCfg=D.images;
+  let dbPromise;
+  function imageDB(){
+    if(!dbPromise)dbPromise=new Promise((resolve,reject)=>{
+      if(!("indexedDB" in window))return reject(Error("IndexedDB unavailable"));
+      const req=indexedDB.open(imageCfg.databaseName,imageCfg.databaseVersion);
+      req.onupgradeneeded=()=> {
+        if(!req.result.objectStoreNames.contains(imageCfg.objectStore))
+          req.result.createObjectStore(imageCfg.objectStore);
+      };
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>reject(req.error);
     });
-
-    return commitChange("Genre created.");
+    return dbPromise;
   }
-
-  function renameGenre(type,id,name) {
-    const g = genreCollection(type).find(g => g.id === id);
-    const clean = name.trim();
-
-    if (!g || !clean) return;
-
-    if (genreCollection(type).some(other =>
-      other.id !== id &&
-      other.name.toLowerCase() === clean.toLowerCase()
-    )) {
-      notify("That genre name already exists.");
-      return;
-    }
-
-    g.name = clean;
-    commitChange("Genre renamed.");
-  }
-
-  function deleteGenre(type,id) {
-    const key = type === "secondary"
-      ? "secondaryGenreIds" : "mainGenreIds";
-
-    for (const recordType of ["group","production"]) {
-      for (const item of collection(recordType)) {
-        if (Array.isArray(item[key])) {
-          item[key] = item[key].filter(x => x !== id);
-        }
-      }
-    }
-
-    const list = genreCollection(type);
-    const index = list.findIndex(g => g.id === id);
-    if (index !== -1) list.splice(index,1);
-
-    commitChange("Genre deleted.");
-  }
-
-  /* ======================================================
-     ENTITY CREATION / UPDATING
-  ====================================================== */
-
-  function createEntity(type,values) {
-    const now = new Date().toISOString();
-
-    const item = {
-      id:uid(),
-      title:String(values.title || "").trim(),
-      createdAt:now,
-      updatedAt:now,
-      order:nextOrder(type,values[PARENT_KEYS[type]]),
-      notes:values.notes || ""
-    };
-
-    if (!item.title) {
-      notify("Please enter a title.");
-      return null;
-    }
-
-    Object.assign(item,values);
-
-    if (type === "group" || type === "production") {
-      item.mainGenreIds = values.mainGenreIds || [];
-      item.secondaryGenreIds = values.secondaryGenreIds || [];
-      item.banner = values.banner || "";
-    }
-
-    if (type === "production") {
-      item.groupId = values.groupId || null;
-      item.watchlist = values.watchlist === true;
-      item.mediaType = values.mediaType || "TV Series";
-      item.status = values.status || "Planned";
-    }
-
-    if (type === "season") {
-      if (!getEntity("production",values.productionId)) {
-        notify("Choose a valid production.");
-        return null;
-      }
-    }
-
-    if (type === "episode") {
-      if (!getEntity("season",values.seasonId)) {
-        notify("Choose a valid season.");
-        return null;
-      }
-
-      item.duration = Math.max(0,Number(values.duration) || 0);
-    }
-
-    if (type === "production" &&
-        item.groupId &&
-        !getEntity("group",item.groupId)) {
-      notify("Choose an existing group.");
-      return null;
-    }
-
-    collection(type).push(item);
-
-    if (!commitChange(`${type[0].toUpperCase()+type.slice(1)} created.`)) {
-      collection(type).pop();
-      return null;
-    }
-
-    return item;
-  }
-
-  function updateEntity(type,id,values) {
-    const item = getEntity(type,id);
-    if (!item) return false;
-
-    const clean = String(values.title || "").trim();
-    if (!clean) {
-      notify("Title cannot be empty.");
-      return false;
-    }
-
-    if (type === "production" && values.groupId &&
-        !getEntity("group",values.groupId)) {
-      notify("Invalid group selected.");
-      return false;
-    }
-
-    if (type === "season" &&
-        !getEntity("production",values.productionId)) {
-      notify("Invalid production selected.");
-      return false;
-    }
-
-    if (type === "episode" &&
-        !getEntity("season",values.seasonId)) {
-      notify("Invalid season selected.");
-      return false;
-    }
-
-    const oldParent = type === "group" ? null :
-      item[PARENT_KEYS[type]] || null;
-
-    const newParent = type === "group" ? null :
-      values[PARENT_KEYS[type]] || null;
-
-    if (oldParent !== newParent) {
-      values.order = nextOrder(type,newParent);
-      // Child coordinates are regenerated relative to the new parent.
-      delete item.mapX;
-      delete item.mapY;
-    }
-
-    Object.assign(item,values,{
-      id:item.id,
-      createdAt:item.createdAt,
-      updatedAt:new Date().toISOString()
-    });
-
-    return commitChange("Changes saved.");
-  }
-
-  function deleteEntity(type,id) {
-    const item = getEntity(type,id);
-    if (!item) return;
-
-    // Delete descendants from the bottom upwards.
-    for (const child of childrenOf(type,id)) {
-      const next = {
-        group:"production",
-        production:"season",
-        season:"episode"
-      }[type];
-
-      deleteEntitySilently(next,child.id);
-    }
-
-    const list = collection(type);
-    const index = list.findIndex(x => x.id === id);
-    if (index !== -1) list.splice(index,1);
-
-    commitChange("Entry deleted.");
-  }
-
-  function deleteEntitySilently(type,id) {
-    const next = {
-      group:"production",
-      production:"season",
-      season:"episode"
-    }[type];
-
-    if (next) {
-      for (const child of childrenOf(type,id)) {
-        deleteEntitySilently(next,child.id);
-      }
-    }
-
-    const list = collection(type);
-    const index = list.findIndex(x => x.id === id);
-    if (index !== -1) list.splice(index,1);
-  }
-
-  function moveOrder(type,id,direction) {
-    const item = getEntity(type,id);
-    if (!item) return;
-
-    const key = PARENT_KEYS[type];
-
-    const parentId = key ? item[key] || null : null;
-
-    const siblings = collection(type)
-      .filter(other =>
-        !key ||
-        String(other[key] || "") === String(parentId || "")
-      )
-      .sort((a,b) => (a.order ?? 0)-(b.order ?? 0));
-
-    const index = siblings.findIndex(x => x.id === id);
-    const otherIndex = index + direction;
-
-    if (otherIndex < 0 || otherIndex >= siblings.length) return;
-
-    [siblings[index],siblings[otherIndex]] =
-      [siblings[otherIndex],siblings[index]];
-
-    siblings.forEach((s,i) => {s.order = i;});
-
-    commitChange("Order updated.");
-  }
-
-  /* ======================================================
-     CONSTELLATION LAYOUT
-  ====================================================== */
-
-  function starProperties(id,type,magnitude=2.4) {
-    const seed = hash(id);
-
-    const warmer = random(seed+18);
-    const hue = warmer < .13
-      ? [255,219,199]
-      : warmer < .37
-        ? [226,235,255]
-        : warmer < .82
-          ? [188,207,255]
-          : [220,200,255];
-
-    return {
-      color:hue,
-      size:.72+random(seed+7)*.85,
-      halo:.6+random(seed+8)*1.35,
-      opacity:.68+random(seed+9)*.32,
-      spikes:random(seed+10) > .51,
-      spikeAngle:random(seed+11)*Math.PI,
-      spikeRatio:.55+random(seed+12)*1.1,
-      twinkleSpeed:.00022+random(seed+13)*.00055,
-      phase:random(seed+14)*Math.PI*2,
-      eccentricity:.82+random(seed+15)*.38,
-      magnitude
-    };
-  }
-
-  function makeNode(obj) {
-    return {
-      ...obj,
-      id:String(obj.id),
-      title:String(obj.title || "Untitled"),
-      visible:0,
-      element:null,
-      sx:-9999,
-      sy:-9999,
-      appearance:starProperties(
-        obj.id,obj.type,obj.magnitude
-      )
-    };
-  }
-
-  function pushNode(node) {
-    if (nodeMap.has(node.id)) return;
-    nodes.push(node);
-    nodeMap.set(node.id,node);
-  }
-
-  function groupPosition(item,index) {
-    const x = Number(item.mapX ?? item.x);
-    const y = Number(item.mapY ?? item.y);
-
-    if ((item.mapX != null || item.x != null) &&
-        (item.mapY != null || item.y != null) &&
-        Number.isFinite(x) && Number.isFinite(y)) {
-      return {x,y};
-    }
-
-    const seed = hash(item.id);
-    const radius =
-      DATA.groupPlacement.initialRadius +
-      Math.sqrt(index)*DATA.groupPlacement.distanceGrowth;
-
-    const angle =
-      DATA.groupPlacement.angleOffset +
-      index*2.39996323 +
-      (random(seed+5)-.5)*.4;
-
-    return {
-      x:Math.cos(angle)*radius,
-      y:Math.sin(angle)*radius
-    };
-  }
-
-  function offsetPosition(item,index,count,type) {
-    const radii = {
-      production:215,
-      season:101,
-      episode:43
-    };
-
-    const seed = hash(item.id);
-    const base = radii[type] || 150;
-
-    const ring = Math.floor(index/9);
-    const ringIndex = index%9;
-    const ringCount = Math.min(9,count-ring*9);
-
-    const angle =
-      -Math.PI/2 +
-      ringIndex*Math.PI*2/Math.max(ringCount,2) +
-      (random(seed+2)-.5)*.27;
-
-    const radius = base*(1+ring*.9)*
-      (.75+random(seed+3)*.52);
-
-    return {
-      x:Math.cos(angle)*radius,
-      y:Math.sin(angle)*radius
-    };
-  }
-
-  function addTree(parentRecord,parentNode) {
-    const nextType = {
-      group:"production",
-      production:"season",
-      season:"episode"
-    }[parentNode.type];
-
-    if (!nextType) return;
-
-    const children = sortedChildren(
-      parentNode.type,parentRecord.id
-    );
-
-    if (parentNode.demo) {
-      const demoChildren = parentRecord.children || [];
-      children.length = 0;
-      children.push(...demoChildren);
-    }
-
-    children.forEach((child,index) => {
-      const offset = offsetPosition(
-        child,index,children.length,nextType
-      );
-
-      const customX = child.mapX != null
-        ? Number(child.mapX) : NaN;
-      const customY = child.mapY != null
-        ? Number(child.mapY) : NaN;
-
-      const node = makeNode({
-        id:child.id,
-        title:titleOf(child),
-        type:nextType,
-        parentId:parentNode.id,
-        depth:parentNode.depth+1,
-        demo:parentNode.demo,
-        record:child,
-        x:Number.isFinite(customX)
-          ? customX : parentNode.x+offset.x,
-        y:Number.isFinite(customY)
-          ? customY : parentNode.y+offset.y,
-        magnitude:1.5+random(hash(child.id)+31)*3
-      });
-
-      pushNode(node);
-      addTree(child,node);
+  async function imageOp(mode,key,value){
+    const db=await imageDB();
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction(imageCfg.objectStore,mode==="get"?"readonly":"readwrite");
+      const store=tx.objectStore(imageCfg.objectStore);
+      const req=mode==="get"?store.get(key):
+        mode==="put"?store.put(value,key):store.delete(key);
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>reject(req.error);
     });
   }
+  async function imageURL(key){
+    if(!key)return null;
+    if(imageCache.has(key))return imageCache.get(key);
+    const blob=await imageOp("get",key);
+    if(!blob)return null;
+    const url=URL.createObjectURL(blob);
+    imageCache.set(key,url);
+    return url;
+  }
+  function evictImage(key){
+    if(imageCache.has(key)){URL.revokeObjectURL(imageCache.get(key));imageCache.delete(key);}
+  }
+  async function compressImage(file){
+    if(!file?.type.startsWith("image/")&&!/\.(heic|heif|avif)$/i.test(file.name))
+      throw Error("Choose a photo.");
+    if(file.size>imageCfg.maximumInputMB*1048576)throw Error("Image is too large.");
+    const url=URL.createObjectURL(file);
+    try{
+      const photo=new Image();photo.src=url;
+      await photo.decode();
+      const scale=Math.min(1,imageCfg.maximumWidth/photo.naturalWidth,
+        imageCfg.maximumHeight/photo.naturalHeight);
+      const canvas=document.createElement("canvas");
+      canvas.width=Math.max(1,Math.round(photo.naturalWidth*scale));
+      canvas.height=Math.max(1,Math.round(photo.naturalHeight*scale));
+      const c=canvas.getContext("2d");
+      c.fillStyle="#080914";c.fillRect(0,0,canvas.width,canvas.height);
+      c.drawImage(photo,0,0,canvas.width,canvas.height);
+      const blob=await new Promise(resolve=>
+        canvas.toBlob(resolve,imageCfg.preferredFormat,imageCfg.quality));
+      if(!blob)throw Error("Image conversion failed.");
+      return blob;
+    }finally{URL.revokeObjectURL(url);}
+  }
+  async function deleteUnusedImage(key){
+    if(!key)return;
+    const used=collection("group").concat(collection("production"))
+      .some(e=>e.bannerImageId===key);
+    if(!used){evictImage(key);try{await imageOp("delete",key);}catch(e){console.warn(e);}}
+  }
 
-  function naturalEdges(siblings) {
-    if (siblings.length < 2) return [];
-
-    const linked = [siblings[0]];
-    const unlinked = siblings.slice(1);
-    const results = [];
-
-    while (unlinked.length) {
-      let candidate = null;
-
-      for (const a of linked) {
-        for (const b of unlinked) {
-          const d = Math.hypot(a.x-b.x,a.y-b.y);
-
-          if (!candidate || d < candidate.d) {
-            candidate = {a,b,d};
-          }
-        }
+  /* Stable but imperfect star characteristics. */
+  function starLook(key,t){
+    const h=hash(key),warm=rnd(h+7),palette=
+      warm<.12?[255,215,188]:warm<.33?[230,236,255]:
+      warm<.77?[178,204,255]:[218,194,251];
+    return {color:palette,size:.65+rnd(h+3)*.85,
+      glow:.55+rnd(h+5)*1.25,spikes:rnd(h+9)>.61,
+      angle:rnd(h+11)*Math.PI,ray:.5+rnd(h+13)*1.3,
+      twinkle:rnd(h+17)*6.283,magnitude:1+rnd(h+19)*3};
+  }
+  function addNode(n){
+    const key=String(n.id);
+    if(byId.has(key))return;
+    n.id=key;n.look=starLook(key,n.type);n.visible=0;
+    n.sx=-999;n.sy=-999;
+    byId.set(key,n);nodes.push(n);
+  }
+  function groupPosition(e,i){
+    if(Number.isFinite(Number(e.mapX))&&Number.isFinite(Number(e.mapY))&&
+      e.mapX!=null&&e.mapY!=null)return {x:+e.mapX,y:+e.mapY};
+    if(e.demo&&Number.isFinite(e.x))return {x:e.x,y:e.y};
+    const angle=D.groupPlacement.angleOffset+i*2.3999632+
+      (rnd(hash(e.id)+4)-.5)*.43;
+    const r=D.groupPlacement.initialRadius+Math.sqrt(i)*D.groupPlacement.distanceGrowth;
+    return {x:Math.cos(angle)*r,y:Math.sin(angle)*r};
+  }
+  function childOffset(e,i,total,t){
+    const radius={production:215,season:105,episode:44}[t]||120;
+    const ring=Math.floor(i/9),k=i%9,n=Math.min(9,total-ring*9);
+    const angle=-Math.PI/2+k*6.283/Math.max(2,n)+
+      (rnd(hash(e.id)+2)-.5)*.38;
+    const r=radius*(1+ring*.95)*(.76+rnd(hash(e.id)+3)*.5);
+    return {x:Math.cos(angle)*r,y:Math.sin(angle)*r};
+  }
+  function appendTree(record,node){
+    const t=nextType[node.type];if(!t)return;
+    const list=node.demo?(record.children||[]):children(node.type,record.id);
+    list.forEach((child,i)=>{
+      const offset=childOffset(child,i,list.length,t);
+      const custom=child.mapX!=null&&child.mapY!=null&&
+        Number.isFinite(+child.mapX)&&Number.isFinite(+child.mapY);
+      const n={id:child.id,title:title(child),type:t,
+        x:custom?+child.mapX:node.x+offset.x,
+        y:custom?+child.mapY:node.y+offset.y,
+        parentId:node.id,demo:node.demo,record:child};
+      addNode(n);appendTree(child,n);
+    });
+  }
+  function treeEdges(siblings){
+    if(siblings.length<2)return;
+    const connected=[siblings[0]],rest=siblings.slice(1);
+    while(rest.length){
+      let best=null;
+      for(const a of connected)for(const b of rest){
+        const distance=Math.hypot(a.x-b.x,a.y-b.y);
+        if(!best||distance<best.distance)best={a,b,distance};
       }
-
-      if (!candidate) break;
-
-      results.push({
-        from:candidate.a.id,
-        to:candidate.b.id
-      });
-
-      linked.push(candidate.b);
-      unlinked.splice(unlinked.indexOf(candidate.b),1);
+      edges.push({a:best.a.id,b:best.b.id});
+      connected.push(best.b);rest.splice(rest.indexOf(best.b),1);
     }
-
-    return results;
   }
-
-  function rebuildUniverse() {
-    nodes = [];
-    edges = [];
-    nodeMap = new Map();
-
-    const scale = width < 650 ? .58 : 1;
-
-    for (const entry of DATA.navigation.nodes) {
-      pushNode(makeNode({
-        id:"nav-"+entry.id,
-        title:entry.title,
-        type:"navigation",
-        action:entry.action,
-        x:entry.x*scale,
-        y:entry.y*scale,
-        depth:0,
-        parentId:null,
-        magnitude:entry.magnitude
-      }));
-    }
-
-    for (const [a,b] of DATA.navigation.connections) {
-      edges.push({
-        from:"nav-"+a,
-        to:"nav-"+b,
-        navigation:true
-      });
-    }
-
-    const actualGroups = [...collection("group")];
-
-    const allGroups = actualGroups.length
-      ? actualGroups
-      : [...DATA.demoGroups];
-
-    allGroups.forEach((group,i) => {
-      const p = groupPosition(group,i);
-
-      const n = makeNode({
-        id:group.id,
-        title:titleOf(group),
-        type:"group",
-        x:p.x,
-        y:p.y,
-        parentId:null,
-        depth:0,
-        demo:group.demo === true,
-        record:group,
-        magnitude:1.4+random(hash(group.id)+22)*1.9
-      });
-
-      pushNode(n);
-      addTree(group,n);
+  function buildWorld(){
+    nodes=[];edges=[];byId=new Map();
+    const scale=width<650?.58:1;
+    for(const n of D.navigation.nodes)addNode({
+      id:"nav-"+n.id,title:n.title,type:"navigation",
+      action:n.action,x:n.x*scale,y:n.y*scale
     });
-
-    // Standalone productions are independent map stars.
-    const standalone = collection("production")
-      .filter(p => !p.groupId && !p.parentId);
-
-    standalone.forEach((p,i) => {
-      const angle = i*2.39996323+1.6;
-      const radius = 1120+Math.sqrt(i)*360;
-
-      const x = Number.isFinite(Number(p.mapX))
-        && p.mapX != null
-          ? Number(p.mapX)
-          : Math.cos(angle)*radius;
-
-      const y = Number.isFinite(Number(p.mapY))
-        && p.mapY != null
-          ? Number(p.mapY)
-          : Math.sin(angle)*radius;
-
-      const n = makeNode({
-        id:p.id,
-        title:titleOf(p),
-        type:"production",
-        x,y,
-        standalone:true,
-        depth:0,
-        parentId:null,
-        record:p,
-        magnitude:1.5+random(hash(p.id))*2.5
-      });
-
-      pushNode(n);
-      addTree(p,n);
+    for(const [a,b] of D.navigation.connections)
+      edges.push({a:"nav-"+a,b:"nav-"+b});
+    const saved=collection("group");
+    const groups=saved.length?saved:D.demoGroups;
+    groups.forEach((e,i)=>{
+      const p=groupPosition(e,i);
+      const n={id:e.id,title:title(e),type:"group",...p,
+        record:e,demo:e.demo===true};
+      addNode(n);appendTree(e,n);
     });
-
-    const parents = new Set(
-      nodes.filter(n => n.parentId).map(n => n.parentId)
-    );
-
-    for (const parentId of parents) {
-      const siblings = nodes.filter(n => n.parentId === parentId);
-      edges.push(...naturalEdges(siblings));
+    collection("production").filter(e=>!e.groupId).forEach((e,i)=>{
+      const a=i*2.399963+1.5,r=1100+Math.sqrt(i)*370;
+      const n={id:e.id,title:title(e),type:"production",
+        x:e.mapX!=null?+e.mapX:Math.cos(a)*r,
+        y:e.mapY!=null?+e.mapY:Math.sin(a)*r,
+        record:e,standalone:true};
+      addNode(n);appendTree(e,n);
+    });
+    const parentIDs=new Set(nodes.filter(n=>n.parentId).map(n=>n.parentId));
+    for(const pid of parentIDs)treeEdges(nodes.filter(n=>n.parentId===pid));
+    makeButtons();dirty=true;
+  }
+  function makeButtons(){
+    starLayer.replaceChildren();
+    for(const n of nodes){
+      const b=document.createElement("button");
+      b.type="button";b.className=`celestial-star ${n.type}-star${n.demo?" demo-star":""}`;
+      b.setAttribute("aria-label",n.title);
+      const hit=document.createElement("span");hit.className="star-touch-area";
+      const label=document.createElement("span");label.className="star-label";
+      label.textContent=n.title;
+      label.style.setProperty("--label-distance",
+        `${n.type==="group"?21:24+Math.round(n.look.size*5)}px`);
+      b.append(hit,label);
+      b.onclick=e=>{
+        e.stopPropagation();
+        if(performance.now()<suppressUntil)return;
+        selectStar(n);
+      };
+      b.onpointerenter=()=>{hovered=n.id;dirty=true;};
+      b.onpointerleave=()=>{hovered=null;dirty=true;};
+      b.onfocus=()=>{hovered=n.id;dirty=true;};
+      n.element=b;starLayer.append(b);
     }
-
-    buildStarButtons();
-    dirty = true;
   }
 
-  /* ======================================================
-     CAMERA
-  ====================================================== */
-
-  function worldToScreen(x,y) {
-    return {
-      x:width/2+(x-camera.x)*camera.zoom,
-      y:height/2+(y-camera.y)*camera.zoom
-    };
-  }
-
-  function screenToWorld(x,y) {
-    return {
-      x:camera.x+(x-width/2)/camera.zoom,
-      y:camera.y+(y-height/2)/camera.zoom
-    };
-  }
-
-  function stopTravel() {travel=null;}
-
-  function setCamera(x,y,zoom) {
-    camera.x=x;
-    camera.y=y;
-    camera.zoom=clamp(zoom,DATA.camera.minZoom,DATA.camera.maxZoom);
+  /* Camera: all map objects remain in a single coordinate space. */
+  function screen(x,y){return {x:width/2+(x-camera.x)*camera.z,
+    y:height/2+(y-camera.y)*camera.z};}
+  function world(x,y){return {x:camera.x+(x-width/2)/camera.z,
+    y:camera.y+(y-height/2)/camera.z};}
+  function setCamera(x,y,z){
+    camera.x=x;camera.y=y;camera.z=clamp(z,D.camera.minZoom,D.camera.maxZoom);
     dirty=true;
   }
-
-  function animateTo(target,duration=850) {
-    stopTravel();
-
-    if (reduced()) {
-      setCamera(target.x,target.y,target.zoom);
-      return;
-    }
-
-    travel = {
-      start:{...camera},
-      end:target,
-      startTime:performance.now(),
-      duration
-    };
+  function animate(target,duration=900){
+    flight=motion()?null:{start:{...camera},end:target,time:performance.now(),duration};
+    if(motion())setCamera(target.x,target.y,target.z);
   }
-
-  function updateTravel(time) {
-    if (!travel) return;
-
-    const t=clamp(
-      (time-travel.startTime)/travel.duration,0,1
-    );
-
-    const e=t*t*(3-2*t);
-
-    const z=Math.exp(lerp(
-      Math.log(travel.start.zoom),
-      Math.log(clamp(
-        travel.end.zoom,
-        DATA.camera.minZoom,
-        DATA.camera.maxZoom
-      )),
-      e
-    ));
-
-    setCamera(
-      lerp(travel.start.x,travel.end.x,e),
-      lerp(travel.start.y,travel.end.y,e),
-      z
-    );
-
-    if (t>=1) travel=null;
-  }
-
-  function zoomAt(x,y,factor) {
-    stopTravel();
-
-    const anchor=screenToWorld(x,y);
-    const zoom=clamp(
-      camera.zoom*factor,
-      DATA.camera.minZoom,
-      DATA.camera.maxZoom
-    );
-
-    setCamera(
-      anchor.x-(x-width/2)/zoom,
-      anchor.y-(y-height/2)/zoom,
-      zoom
-    );
-  }
-
-  function homeCamera() {
-    const nav = nodes.filter(n => n.type === "navigation");
-
-    if (!nav.length) return {x:0,y:0,zoom:1};
-
-    const xs=nav.map(n=>n.x);
-    const ys=nav.map(n=>n.y);
-
+  function homeTarget(){
+    const list=nodes.filter(n=>n.type==="navigation");
+    const xs=list.map(n=>n.x),ys=list.map(n=>n.y);
     const minX=Math.min(...xs),maxX=Math.max(...xs);
     const minY=Math.min(...ys),maxY=Math.max(...ys);
-
-    const zoom=clamp(Math.min(
-      width*(width<650?.80:.72)/(maxX-minX+110),
-      height*.51/(maxY-minY+130),
-      1.1
-    ),DATA.camera.minZoom,1.1);
-
-    return {
-      x:(minX+maxX)/2,
-      y:(minY+maxY)/2,
-      zoom
-    };
+    return {x:(minX+maxX)/2,y:(minY+maxY)/2,
+      z:clamp(Math.min(width*(width<650?.8:.72)/(maxX-minX+115),
+        height*.51/(maxY-minY+130),1.1),D.camera.minZoom,1.1)};
   }
-
-  function goHome() {
-    focusedNode=null;
-    selectedNode=null;
-    animateTo(homeCamera(),800);
+  function goHome(){focused=null;selected=null;animate(homeTarget(),850);}
+  function focus(n){
+    focused=n;selected=n.id;
+    const z={navigation:1.35,group:2.1,production:4.5,season:9.4,episode:13}[n.type]||2;
+    animate({x:n.x,y:n.y,z:Math.max(z,
+      Math.hypot(camera.x-n.x,camera.y-n.y)<12?camera.z*1.24:0)},950);
   }
-
-  function focusNode(node) {
-    focusedNode=node;
-    selectedNode=node.id;
-
-    const targets={
-      navigation:1.35,
-      group:2.1,
-      production:4.5,
-      season:9.4,
-      episode:13
-    };
-
-    let zoom=targets[node.type] || 2;
-
-    if (
-      Math.hypot(camera.x-node.x,camera.y-node.y)<12 &&
-      camera.zoom>=zoom*.90
-    ) {
-      zoom=Math.min(DATA.camera.maxZoom,camera.zoom*1.3);
+  function zoomAt(x,y,factor){
+    flight=null;const anchor=world(x,y);
+    const z=clamp(camera.z*factor,D.camera.minZoom,D.camera.maxZoom);
+    setCamera(anchor.x-(x-width/2)/z,anchor.y-(y-height/2)/z,z);
+  }
+  function nodeVisibility(n){
+    if(n.type==="navigation"||n.type==="group"||n.standalone)return 1;
+    const rule={production:D.semanticZoom.productions,
+      season:D.semanticZoom.seasons,episode:D.semanticZoom.episodes}[n.type];
+    if(!rule)return 1;
+    let a=ease(clamp((camera.z-rule.start)/(rule.full-rule.start),0,1));
+    const parent=byId.get(n.parentId);
+    if(parent){
+      const distance=Math.hypot(camera.x-parent.x,camera.y-parent.y)*camera.z;
+      const limit=Math.max(width,height)*1.5;
+      a*=1-ease(clamp((distance-limit*.75)/(limit*.85),0,1));
     }
-
-    animateTo({
-      x:node.x,
-      y:node.y,
-      zoom
-    },950);
+    return a;
   }
-
-  /* ======================================================
-     SCREEN SPACE STAR LABELS
-  ====================================================== */
-
-  function buildStarButtons() {
-    starLayer.replaceChildren();
-
-    for (const node of nodes) {
-      const el=document.createElement("button");
-
-      el.type="button";
-      el.className=
-        `celestial-star ${node.type}-star`+
-        (node.demo?" demo-star":"");
-
-      el.setAttribute("aria-label","Explore "+node.title);
-
-      const hit=document.createElement("span");
-      hit.className="star-touch-area";
-
-      const label=document.createElement("span");
-      label.className="star-label";
-      label.textContent=node.title;
-
-      const variation=node.appearance;
-
-      label.style.setProperty(
-        "--label-distance",
-        `${23+Math.round(variation.size*5)}px`
-      );
-
-      el.append(hit,label);
-
-      el.addEventListener("click",event=>{
-        event.stopPropagation();
-        if (performance.now()<blockClickUntil) return;
-        selectStar(node);
-      });
-
-      el.addEventListener("pointerenter",()=>{
-        selectedNode=node.id;
-        dirty=true;
-      });
-
-      el.addEventListener("pointerleave",()=>{
-        selectedNode=focusedNode?.id || null;
-        dirty=true;
-      });
-
-      el.addEventListener("focus",()=>{
-        selectedNode=node.id;
-        dirty=true;
-      });
-
-      node.element=el;
-      starLayer.appendChild(el);
+  function placeButtons(){
+    for(const n of nodes){
+      const p=screen(n.x,n.y);n.sx=p.x;n.sy=p.y;
+      n.visible=nodeVisibility(n);
+      const visible=n.visible>.025&&p.x>-140&&p.x<width+140&&
+        p.y>-140&&p.y<height+140;
+      const b=n.element;b.classList.toggle("is-hidden",!visible);
+      if(!visible){b.tabIndex=-1;continue;}
+      b.style.left=p.x+"px";b.style.top=p.y+"px";
+      b.style.setProperty("--visibility",n.visible);
+      b.classList.toggle("selected",selected===n.id||hovered===n.id);
+      b.disabled=n.visible<.67;b.tabIndex=b.disabled?-1:0;
     }
   }
 
-  function visibility(node) {
-    if (node.type==="navigation" ||
-        node.type==="group" ||
-        node.standalone) return 1;
-
-    const config={
-      production:DATA.semanticZoom.productions,
-      season:DATA.semanticZoom.seasons,
-      episode:DATA.semanticZoom.episodes
-    }[node.type];
-
-    if (!config) return 1;
-
-    let alpha=smooth(
-      config.start,
-      config.full,
-      camera.zoom
-    );
-
-    const parent=nodeMap.get(node.parentId);
-
-    if (parent) {
-      const d=Math.hypot(
-        camera.x-parent.x,
-        camera.y-parent.y
-      )*camera.zoom;
-
-      const range=Math.max(width,height)*1.5;
-      alpha*=1-smooth(range*.75,range*1.6,d);
-    }
-
-    return clamp(alpha,0,1);
-  }
-
-  function positionButtons() {
-    for (const n of nodes) {
-      const p=worldToScreen(n.x,n.y);
-      n.sx=p.x;
-      n.sy=p.y;
-      n.visible=visibility(n);
-
-      const onScreen=
-        p.x>-130 && p.x<width+130 &&
-        p.y>-130 && p.y<height+130;
-
-      const shown=onScreen && n.visible>.025;
-
-      n.element.classList.toggle("is-hidden",!shown);
-
-      if (!shown) {
-        n.element.tabIndex=-1;
-        continue;
-      }
-
-      n.element.style.left=p.x+"px";
-      n.element.style.top=p.y+"px";
-      n.element.style.setProperty(
-        "--visibility",
-        n.visible.toFixed(3)
-      );
-
-      n.element.disabled=n.visible<.67;
-      n.element.tabIndex=n.visible>=.67?0:-1;
-
-      n.element.classList.toggle(
-        "selected",selectedNode===n.id
-      );
-    }
-  }
-
-  /* ======================================================
-     REALISTIC STAR RENDERING
-  ====================================================== */
-
-  function drawStar(n,time) {
-    if (n.visible<.015) return;
-
-    const x=n.sx,y=n.sy;
-    if (x<-100||x>width+100||y<-100||y>height+100) return;
-
-    const styles={
-      navigation:DATA.appearance.navigationStars,
-      group:DATA.appearance.groupStars,
-      production:DATA.appearance.productionStars,
-      season:DATA.appearance.seasonStars,
-      episode:DATA.appearance.episodeStars
-    };
-
-    const style=styles[n.type];
-    if (!style) return;
-
-    const v=n.appearance;
-    const [r,g,b]=v.color;
-
-    const selected=selectedNode===n.id;
-
-    const alpha=n.visible*v.opacity;
-
-    const pulse=reduced()?1:
-      1+Math.sin(time*v.twinkleSpeed+v.phase)*.055;
-
-    const radius=style.radius*v.size*pulse;
-    const glow=style.glow*v.halo*
-      (state.settings.constellationGlow/65)*
-      (selected?1.5:1);
-
-    const outer=ctx.createRadialGradient(
-      x,y,0,x,y,glow
-    );
-
-    outer.addColorStop(
-      0,`rgba(${r},${g},${b},${alpha*.24})`
-    );
-    outer.addColorStop(
-      .2,`rgba(${r},${g},${b},${alpha*.14})`
-    );
-    outer.addColorStop(
-      .6,`rgba(${r},${g},${b},${alpha*.025})`
-    );
-    outer.addColorStop(1,"rgba(0,0,0,0)");
-
-    ctx.save();
-
-    // Slight elliptical imperfection.
-    ctx.translate(x,y);
-    ctx.rotate(v.spikeAngle*.15);
-    ctx.scale(1,v.eccentricity);
-
-    ctx.fillStyle=outer;
-    ctx.beginPath();
-    // Gradient is already in screen coordinates,
-    // so draw glow in untransformed space below.
-    ctx.restore();
-
-    ctx.fillStyle=outer;
-    ctx.beginPath();
-    ctx.arc(x,y,glow,0,Math.PI*2);
-    ctx.fill();
-
-    const core=ctx.createRadialGradient(
-      x,y,0,x,y,radius*2.8
-    );
-
-    core.addColorStop(
-      0,`rgba(255,255,255,${alpha})`
-    );
-    core.addColorStop(
-      .16,`rgba(${r},${g},${b},${alpha})`
-    );
-    core.addColorStop(
-      .5,`rgba(${r},${g},${b},${alpha*.35})`
-    );
-    core.addColorStop(1,"rgba(0,0,0,0)");
-
-    ctx.fillStyle=core;
-    ctx.beginPath();
-    ctx.ellipse(
-      x,y,radius*2.8,
-      radius*2.8*v.eccentricity,
-      v.spikeAngle,0,Math.PI*2
-    );
-    ctx.fill();
-
-    // Only some stars have diffraction spikes.
-    if (v.spikes && (radius>2.1 || selected)) {
-      ctx.save();
-      ctx.translate(x,y);
-      ctx.rotate(v.spikeAngle);
-
-      const length=radius*(
-        selected?7.5:4.5
-      )*v.spikeRatio;
-
-      ctx.globalAlpha=alpha*.5;
-
-      let grad=ctx.createLinearGradient(-length,0,length,0);
-      grad.addColorStop(0,"transparent");
-      grad.addColorStop(.5,`rgba(${r},${g},${b},.75)`);
-      grad.addColorStop(1,"transparent");
-
-      ctx.strokeStyle=grad;
-      ctx.lineWidth=.55;
-      ctx.beginPath();
-      ctx.moveTo(-length,0);
-      ctx.lineTo(length,0);
-      ctx.stroke();
-
-      const vertical=length*(.4+v.eccentricity*.5);
-
-      grad=ctx.createLinearGradient(0,-vertical,0,vertical);
-      grad.addColorStop(0,"transparent");
-      grad.addColorStop(.5,`rgba(${r},${g},${b},.68)`);
-      grad.addColorStop(1,"transparent");
-
-      ctx.strokeStyle=grad;
-      ctx.beginPath();
-      ctx.moveTo(0,-vertical);
-      ctx.lineTo(0,vertical);
-      ctx.stroke();
-
-      ctx.restore();
-    }
-  }
-
-  function drawConstellations(time) {
+  /* Variable bright/cool/warm stellar bodies, subdued groups. */
+  function drawStars(time){
     ctx.clearRect(0,0,width,height);
-
-    for (const e of edges) {
-      const a=nodeMap.get(e.from);
-      const b=nodeMap.get(e.to);
-
-      if (!a||!b) continue;
-
+    for(const line of edges){
+      const a=byId.get(line.a),b=byId.get(line.b);
+      if(!a||!b)continue;
       const alpha=Math.min(a.visible,b.visible);
-      if (alpha<.02) continue;
-
-      if (
-        Math.max(a.sx,b.sx)<-70 ||
-        Math.min(a.sx,b.sx)>width+70 ||
-        Math.max(a.sy,b.sy)<-70 ||
-        Math.min(a.sy,b.sy)>height+70
-      ) continue;
-
-      const highlighted=
-        selectedNode===a.id || selectedNode===b.id;
-
-      ctx.beginPath();
-      ctx.moveTo(a.sx,a.sy);
-      ctx.lineTo(b.sx,b.sy);
-
-      ctx.strokeStyle=highlighted
-        ? `rgba(205,207,255,${alpha*.6})`
-        : `rgba(160,179,227,${alpha*.24})`;
-
-      ctx.lineWidth=highlighted?1:.65;
-      ctx.stroke();
+      if(alpha<.03||Math.max(a.sx,b.sx)<-80||
+        Math.min(a.sx,b.sx)>width+80||Math.max(a.sy,b.sy)<-80||
+        Math.min(a.sy,b.sy)>height+80)continue;
+      const active=selected===a.id||selected===b.id;
+      ctx.strokeStyle=`rgba(165,184,234,${alpha*(active?.58:.23)})`;
+      ctx.lineWidth=active?1:.65;ctx.beginPath();
+      ctx.moveTo(a.sx,a.sy);ctx.lineTo(b.sx,b.sy);ctx.stroke();
     }
-
-    for (const n of nodes) drawStar(n,time);
-  }
-
-  /* ======================================================
-     BACKGROUND & NEBULA
-  ====================================================== */
-
-  function resizeCanvas(element,context,ratio) {
-    element.width=Math.round(width*ratio);
-    element.height=Math.round(height*ratio);
-    context.setTransform(ratio,0,0,ratio,0,0);
-  }
-
-  function rebuildBackgroundStars() {
-    backgroundStars=[];
-
-    const count=clamp(
-      Math.round(
-        DATA.graphics.backgroundStarCount*
-        width*height/850000*
-        state.settings.starDensity/75
-      ),100,DATA.graphics.maximumBackgroundStars
-    );
-
-    for (let i=0;i<count;i++) {
-      const s=i*173+48192;
-      const r=random(s+1);
-
-      backgroundStars.push({
-        x:random(s+2)*width,
-        y:random(s+3)*height,
-        radius:r<.84
-          ? .18+random(s+4)*.49
-          : r<.98
-            ? .68+random(s+5)*.53
-            : 1.25+random(s+6)*1.1,
-        alpha:.13+random(s+7)*.74,
-        depth:.018+random(s+8)*.18,
-        speed:.00014+random(s+9)*.00048,
-        phase:random(s+10)*Math.PI*2,
-        color:random(s+11)<.13
-          ? [245,221,209]
-          : random(s+12)<.6
-            ? [216,225,255]
-            : [180,202,250]
-      });
+    for(const n of nodes){
+      if(n.visible<.025||n.sx<-90||n.sx>width+90||
+        n.sy<-90||n.sy>height+90)continue;
+      const style={navigation:D.appearance.navigationStars,
+        group:D.appearance.groupStars,
+        production:D.appearance.productionStars,
+        season:D.appearance.seasonStars,
+        episode:D.appearance.episodeStars}[n.type];
+      if(!style)continue;
+      const v=n.look,[r,g,b]=v.color;
+      const active=selected===n.id||hovered===n.id;
+      const alpha=n.visible*(.65+rnd(hash(n.id)+9)*.35);
+      const pulse=motion()?1:1+Math.sin(time*.0004+v.twinkle)*.045;
+      const radius=style.radius*v.size*pulse;
+      const glow=style.glow*v.glow*(state.settings.constellationGlow/65)*
+        (active?1.4:1);
+      const halo=ctx.createRadialGradient(n.sx,n.sy,0,n.sx,n.sy,glow);
+      halo.addColorStop(0,`rgba(${r},${g},${b},${alpha*.27})`);
+      halo.addColorStop(.22,`rgba(${r},${g},${b},${alpha*.11})`);
+      halo.addColorStop(1,"rgba(0,0,0,0)");
+      ctx.fillStyle=halo;ctx.beginPath();
+      ctx.arc(n.sx,n.sy,glow,0,6.283);ctx.fill();
+      const core=ctx.createRadialGradient(n.sx,n.sy,0,n.sx,n.sy,radius*2.7);
+      core.addColorStop(0,`rgba(255,255,255,${alpha})`);
+      core.addColorStop(.19,`rgba(${r},${g},${b},${alpha})`);
+      core.addColorStop(.52,`rgba(${r},${g},${b},${alpha*.33})`);
+      core.addColorStop(1,"rgba(0,0,0,0)");
+      ctx.save();ctx.translate(n.sx,n.sy);ctx.rotate(v.angle);
+      ctx.scale(1,.78+rnd(hash(n.id)+15)*.44);
+      ctx.fillStyle=core;ctx.beginPath();ctx.arc(0,0,radius*2.7,0,6.283);
+      ctx.fill();ctx.restore();
+      if(v.spikes&&(radius>2.7||active)){
+        ctx.save();ctx.translate(n.sx,n.sy);ctx.rotate(v.angle);
+        const l=radius*(active?7:4.7)*v.ray;
+        ctx.strokeStyle=`rgba(${r},${g},${b},${alpha*.48})`;
+        ctx.lineWidth=.55;
+        ctx.beginPath();ctx.moveTo(-l,0);ctx.lineTo(l,0);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(0,-l*.65);ctx.lineTo(0,l*.65);ctx.stroke();
+        ctx.restore();
+      }
     }
   }
-
-  function drawBackground(time) {
-    bgCtx.clearRect(0,0,width,height);
-    const brightness=state.settings.starBrightness/100;
-
-    for (const star of backgroundStars) {
-      const x=((star.x-camera.x*star.depth)%width+width)%width;
-      const y=((star.y-camera.y*star.depth)%height+height)%height;
-
-      const twinkle=reduced()?1:
-        .88+Math.sin(time*star.speed+star.phase)*.12;
-
-      const a=clamp(
-        star.alpha*twinkle*(.42+brightness),0,1
-      );
-
-      const [r,g,b]=star.color;
-
-      bgCtx.fillStyle=`rgba(${r},${g},${b},${a})`;
-      bgCtx.beginPath();
-      bgCtx.arc(x,y,star.radius,0,Math.PI*2);
-      bgCtx.fill();
+  function resizeCanvas(c,context,d){
+    c.width=Math.round(width*d);c.height=Math.round(height*d);
+    context.setTransform(d,0,0,d,0,0);
+  }
+  function backgroundBuild(){
+    dust=[];
+    const count=clamp(Math.round(D.graphics.backgroundStarCount*
+      width*height/850000*state.settings.starDensity/75),
+      100,D.graphics.maximumBackgroundStars);
+    for(let i=0;i<count;i++){
+      const s=i*173+48192,r=rnd(s+1);
+      dust.push({x:rnd(s+2)*width,y:rnd(s+3)*height,
+        radius:r<.84?.18+rnd(s+4)*.49:r<.98?.68+rnd(s+5)*.53:
+          1.25+rnd(s+6)*1.1,
+        alpha:.13+rnd(s+7)*.74,depth:.018+rnd(s+8)*.18,
+        phase:rnd(s+10)*6.283,speed:.00014+rnd(s+9)*.00048,
+        color:rnd(s+11)<.13?[245,221,209]:
+          rnd(s+12)<.6?[216,225,255]:[180,202,250]});
     }
   }
-
-  function buildNebula() {
-    const texture=document.createElement("canvas");
-    const ratio=DATA.graphics.nebulaResolution;
-
-    texture.width=Math.max(320,Math.round(width*ratio));
-    texture.height=Math.max(260,Math.round(height*ratio));
-
-    const t=texture.getContext("2d");
-    const w=texture.width,h=texture.height;
-
-    const clouds=[
-      [.12,.25,.57,24,68,150,.24],
-      [.33,.48,.50,42,88,173,.23],
-      [.51,.40,.43,52,104,192,.20],
-      [.78,.61,.58,42,39,111,.17],
-      [.83,.20,.47,26,61,133,.17],
-      [.15,.79,.43,20,44,102,.14],
-      [.62,.77,.44,23,49,115,.15]
-    ];
-
-    for (const [cx,cy,rad,r,g,b,alpha] of clouds) {
-      const x=cx*w,y=cy*h;
-      const radius=rad*Math.max(w,h);
-      const grad=t.createRadialGradient(x,y,0,x,y,radius);
-
-      grad.addColorStop(0,`rgba(${r},${g},${b},${alpha})`);
-      grad.addColorStop(.38,`rgba(${r},${g},${b},${alpha*.52})`);
-      grad.addColorStop(1,"transparent");
-
-      t.fillStyle=grad;
-      t.fillRect(0,0,w,h);
+  function paintBackground(time){
+    bctx.clearRect(0,0,width,height);
+    for(const s of dust){
+      const x=((s.x-camera.x*s.depth)%width+width)%width;
+      const y=((s.y-camera.y*s.depth)%height+height)%height;
+      const alpha=clamp(s.alpha*(.42+state.settings.starBrightness/100)*
+        (motion()?1:.88+Math.sin(time*s.speed+s.phase)*.12),0,1);
+      bctx.fillStyle=`rgba(${s.color.join(",")},${alpha})`;
+      bctx.beginPath();bctx.arc(x,y,s.radius,0,6.283);bctx.fill();
     }
-
-    for (let i=0;i<300;i++) {
-      const s=i*37+181;
-      const progress=random(s);
-      const x=(progress*1.3-.14)*w;
-      const y=(.65-.37*progress+(random(s+1)-.5)*.38)*h;
-      const radius=8+random(s+2)*55;
-      const a=.012+random(s+3)*.044;
-
-      const grad=t.createRadialGradient(x,y,0,x,y,radius);
-      grad.addColorStop(0,`rgba(85,122,207,${a})`);
-      grad.addColorStop(1,"transparent");
-
-      t.fillStyle=grad;
-      t.beginPath();
-      t.arc(x,y,radius,0,Math.PI*2);
-      t.fill();
+  }
+  function nebulaBuild(){
+    const t=document.createElement("canvas"),s=D.graphics.nebulaResolution;
+    t.width=Math.max(320,Math.round(width*s));
+    t.height=Math.max(260,Math.round(height*s));
+    const c=t.getContext("2d"),w=t.width,h=t.height;
+    const clouds=[[.12,.25,.57,24,68,150,.24],
+      [.33,.48,.5,42,88,173,.23],[.51,.4,.43,52,104,192,.2],
+      [.78,.61,.58,42,39,111,.17],[.83,.2,.47,26,61,133,.17],
+      [.15,.79,.43,20,44,102,.14],[.62,.77,.44,23,49,115,.15]];
+    for(const [x,y,r,red,green,blue,a] of clouds){
+      const X=x*w,Y=y*h,R=r*Math.max(w,h);
+      const g=c.createRadialGradient(X,Y,0,X,Y,R);
+      g.addColorStop(0,`rgba(${red},${green},${blue},${a})`);
+      g.addColorStop(.38,`rgba(${red},${green},${blue},${a*.52})`);
+      g.addColorStop(1,"transparent");
+      c.fillStyle=g;c.fillRect(0,0,w,h);
     }
-
-    nebulaTexture=texture;
-  }
-
-  function drawNebula() {
-    if (!nebulaTexture) return;
-
-    nebulaCtx.clearRect(0,0,width,height);
-
-    const x=clamp(camera.x*.007,-80,80);
-    const y=clamp(camera.y*.007,-80,80);
-
-    nebulaCtx.globalAlpha=
-      state.settings.nebulaIntensity/100;
-
-    nebulaCtx.drawImage(
-      nebulaTexture,
-      -80-x,-80-y,
-      width+160,height+160
-    );
-
-    nebulaCtx.globalAlpha=1;
-  }
-
-  function resizeGraphics() {
-    width=innerWidth;
-    height=innerHeight;
-
-    dpr=Math.min(
-      devicePixelRatio||1,
-      DATA.graphics.maxPixelRatio
-    );
-
-    resizeCanvas(canvas,ctx,dpr);
-    resizeCanvas(bgCanvas,bgCtx,dpr);
-    resizeCanvas(nebulaCanvas,nebulaCtx,1);
-
-    rebuildBackgroundStars();
-    buildNebula();
-    dirty=true;
-  }
-
-  /* ======================================================
-     RENDER LOOP
-  ====================================================== */
-
-  function frame(time) {
-    if (!running) return;
-
-    if (time-lastFrame>=16) {
-      updateTravel(time);
-      positionButtons();
-      drawNebula();
-      drawBackground(time);
-      drawConstellations(time);
-      lastFrame=time;
-      dirty=false;
+    for(let i=0;i<300;i++){
+      const s=i*37+181,p=rnd(s),x=(p*1.3-.14)*w;
+      const y=(.65-.37*p+(rnd(s+1)-.5)*.38)*h;
+      const r=8+rnd(s+2)*55,a=.012+rnd(s+3)*.044;
+      const g=c.createRadialGradient(x,y,0,x,y,r);
+      g.addColorStop(0,`rgba(85,122,207,${a})`);
+      g.addColorStop(1,"transparent");
+      c.fillStyle=g;c.beginPath();c.arc(x,y,r,0,6.283);c.fill();
     }
-
-    frameHandle=requestAnimationFrame(frame);
+    nebulaTexture=t;
   }
-
-  function startLoop() {
-    if (running) return;
-    running=true;
-    frameHandle=requestAnimationFrame(frame);
+  function paintNebula(){
+    if(!nebulaTexture)return;
+    nctx.clearRect(0,0,width,height);
+    nctx.globalAlpha=state.settings.nebulaIntensity/100;
+    nctx.drawImage(nebulaTexture,-80-clamp(camera.x*.007,-80,80),
+      -80-clamp(camera.y*.007,-80,80),width+160,height+160);
+    nctx.globalAlpha=1;
   }
-
-  function stopLoop() {
-    running=false;
-    cancelAnimationFrame(frameHandle);
+  function resize(){
+    width=innerWidth;height=innerHeight;
+    ratio=Math.min(devicePixelRatio||1,D.graphics.maxPixelRatio);
+    resizeCanvas(cv,ctx,ratio);resizeCanvas(bg,bctx,ratio);
+    resizeCanvas(nc,nctx,1);backgroundBuild();nebulaBuild();dirty=true;
   }
-
-  /* ======================================================
-     OVERLAYS
-  ====================================================== */
-
-  function showOverlay(overlay) {
-    if (currentOverlay && currentOverlay!==overlay) {
-      currentOverlay.classList.remove("open");
-      currentOverlay.setAttribute("aria-hidden","true");
+  function loop(t){
+    if(!running)return;
+    if(t-lastFrame>=16){
+      if(flight){
+        const p=clamp((t-flight.time)/flight.duration,0,1),e=ease(p);
+        const z=Math.exp(mix(Math.log(flight.start.z),
+          Math.log(clamp(flight.end.z,D.camera.minZoom,D.camera.maxZoom)),e));
+        setCamera(mix(flight.start.x,flight.end.x,e),
+          mix(flight.start.y,flight.end.y,e),z);
+        if(p===1)flight=null;
+      }
+      if(!motion()||dirty||flight){
+        placeButtons();paintNebula();paintBackground(t);drawStars(t);dirty=false;
+      }
+      lastFrame=t;
     }
+    frame=requestAnimationFrame(loop);
+  }
+  function start(){if(running)return;running=true;frame=requestAnimationFrame(loop);}
+  function stop(){running=false;cancelAnimationFrame(frame);}
 
-    oldFocus=document.activeElement;
-    currentOverlay=overlay;
-    overlay.classList.add("open");
-    overlay.setAttribute("aria-hidden","false");
+  /* Overlays and page stack. */
+  function show(el){
+    if(overlay&&overlay!==el){
+      overlay.classList.remove("open");
+      overlay.setAttribute("aria-hidden","true");
+    }
+    previousFocus=document.activeElement;overlay=el;
+    el.classList.add("open");el.setAttribute("aria-hidden","false");
     viewport.inert=true;
   }
-
-  function closeOverlay() {
-    if (!currentOverlay) return;
-
-    currentOverlay.classList.remove("open");
-    currentOverlay.setAttribute("aria-hidden","true");
-    currentOverlay=null;
-    viewport.inert=false;
-
-    if (oldFocus?.isConnected) oldFocus.focus();
-    else viewport.focus();
+  function hide(){
+    if(!overlay)return;
+    overlay.classList.remove("open");
+    overlay.setAttribute("aria-hidden","true");overlay=null;
+    viewport.inert=pageEl.classList.contains("open");
+    if(previousFocus?.isConnected)previousFocus.focus();
   }
-
-  function openDetail(html) {
-    $("#detailContent").innerHTML=html;
-    $("#detailSheet").scrollTop=0;
-    showOverlay(detailOverlay);
-    $("#closeDetailButton").focus();
+  function detail(html){
+    $("#detailContent").innerHTML=html;$("#detailSheet").scrollTop=0;
+    show(detailEl);$("#closeDetailButton").focus();
   }
-
-  function openEditor(html,title="Create & Edit",eyebrow="YOUR ARCHIVE") {
-    $("#editorTitle").textContent=title;
-    $("#editorEyebrow").textContent=eyebrow;
-    $("#editorContent").innerHTML=html;
-    $("#editorSheet").scrollTop=0;
-    showOverlay(editorOverlay);
-    $("#closeEditorButton").focus();
+  function editor(html,heading="Create & Edit"){
+    $("#editorTitle").textContent=heading;$("#editorContent").innerHTML=html;
+    $("#editorSheet").scrollTop=0;show(editorEl);$("#closeEditorButton").focus();
   }
-
-  function confirmAction(message,callback) {
-    confirmCallback=callback;
+  function ask(message,callback){
+    confirmCallback=callback;confirmEl.classList.add("open");
+    confirmEl.setAttribute("aria-hidden","false");
     $("#confirmMessage").textContent=message;
-    confirmOverlay.classList.add("open");
-    confirmOverlay.setAttribute("aria-hidden","false");
     $("#cancelConfirmButton").focus();
   }
-
-  function closeConfirm() {
-    confirmOverlay.classList.remove("open");
-    confirmOverlay.setAttribute("aria-hidden","true");
+  function dismissConfirm(){
+    confirmEl.classList.remove("open");
+    confirmEl.setAttribute("aria-hidden","true");
     confirmCallback=null;
   }
 
-  /* ======================================================
-     GENRE EDITOR
-  ====================================================== */
-
-  function openGenreManager() {
-    openDetail(`
-      <span class="detail-eyebrow">PERSONAL CATEGORIES</span>
-      <h2 id="detailTitle">Genre Creation</h2>
-      <p>Create your own genres and secondary tags.
-      There are no preset categories.</p>
-
-      <h3>Main Genres</h3>
-      <div class="genre-create-row">
-        <input id="newMainGenre" class="form-input"
-          placeholder="New main genre...">
-        <button class="soft-button primary-button"
-          id="addMainGenre">Add</button>
-      </div>
-      <div class="genre-list" id="mainGenreList"></div>
-
-      <h3>Secondary Genres & Tags</h3>
-      <div class="genre-create-row">
-        <input id="newSecondaryGenre" class="form-input"
-          placeholder="New tag...">
-        <button class="soft-button primary-button"
-          id="addSecondaryGenre">Add</button>
-      </div>
-      <div class="genre-list" id="secondaryGenreList"></div>
-    `);
-
-    $("#addMainGenre").onclick=()=>{
-      if (createGenre("main",$("#newMainGenre").value)) {
-        openGenreManager();
-      }
-    };
-
-    $("#addSecondaryGenre").onclick=()=>{
-      if (createGenre("secondary",$("#newSecondaryGenre").value)) {
-        openGenreManager();
-      }
-    };
-
-    for (const [input,type] of [
-      ["newMainGenre","main"],
-      ["newSecondaryGenre","secondary"]
-    ]) {
-      $("#"+input).addEventListener("keydown",e=>{
-        if (e.key==="Enter") {
-          e.preventDefault();
-          const val=e.target.value;
-          if (createGenre(type,val)) openGenreManager();
-        }
-      });
-    }
-
-    renderGenreList("main");
-    renderGenreList("secondary");
+  /* Group / Series page; page banner uses a local image object URL. */
+  function pageRecord(t,key){
+    const saved=find(t,key);
+    if(saved)return {record:saved,demo:false};
+    const n=byId.get(String(key));
+    if(n?.demo&&n.type===t)return {record:n.record,demo:true};
+    return null;
   }
-
-  function renderGenreList(type) {
-    const target=$("#"+(type==="main"
-      ?"mainGenreList":"secondaryGenreList"));
-
-    const list=genreCollection(type);
-
-    if (!list.length) {
-      target.innerHTML=`<p class="genre-empty">
-        No ${type==="main"?"main genres":"secondary tags"} created yet.
-      </p>`;
-      return;
-    }
-
-    target.innerHTML="";
-
-    for (const genre of list) {
-      const chip=document.createElement("div");
-      chip.className="genre-chip";
-
-      const name=document.createElement("span");
-      name.textContent=genre.name;
-
-      const rename=document.createElement("button");
-      rename.textContent="✎";
-      rename.title="Rename";
-
-      const remove=document.createElement("button");
-      remove.textContent="×";
-      remove.title="Delete";
-
-      rename.onclick=()=>{
-        const result=prompt("Rename genre:",genre.name);
-        if (result===null) return;
-        renameGenre(type,genre.id,result);
-        openGenreManager();
-      };
-
-      remove.onclick=()=>{
-        confirmAction(
-          `Delete "${genre.name}"? Its assignments will be removed from entries.`,
-          ()=>{
-            deleteGenre(type,genre.id);
-            openGenreManager();
-          }
-        );
-      };
-
-      chip.append(name,rename,remove);
-      target.appendChild(chip);
-    }
+  function pageChildren(t,record,demo){
+    return demo?(record.children||[]):children(t,record.id);
   }
-
-  /* ======================================================
-     MANAGER OVERVIEW
-  ====================================================== */
-
-  function openManager() {
-    managerView={type:null,id:null};
-
-    const sections=TYPES.map(type=>{
-      const list=collection(type)
-        .slice()
-        .sort((a,b)=>(a.order??0)-(b.order??0));
-
-      return `
-        <section class="manager-section">
-          <div class="manager-section-title">
-            <h3>${type[0].toUpperCase()+type.slice(1)}s</h3>
-            <span class="manager-count">${list.length}</span>
-          </div>
-
-          <div class="manager-list">
-            ${list.length?list.map(item=>`
-              <div class="manager-item">
-                <div class="manager-item-main">
-                  <span class="manager-item-title">
-                    ${escapeHTML(titleOf(item))}
-                  </span>
-                  <span class="manager-item-subtitle">
-                    ${escapeHTML(parentOf(type,item)?.item.title ||
-                      (type==="production"?"Standalone":""))}
-                  </span>
-                </div>
-                <div class="manager-item-actions">
-                  <button class="mini-button" data-edit="${type}"
-                    data-id="${escapeHTML(item.id)}" title="Edit">✎</button>
-                  <button class="mini-button" data-up="${type}"
-                    data-id="${escapeHTML(item.id)}" title="Move up">↑</button>
-                  <button class="mini-button" data-down="${type}"
-                    data-id="${escapeHTML(item.id)}" title="Move down">↓</button>
-                  <button class="mini-button" data-delete="${type}"
-                    data-id="${escapeHTML(item.id)}" title="Delete">×</button>
-                </div>
-              </div>
-            `).join(""):`<p class="manager-empty">
-              No ${type}s added yet.
-            </p>`}
-          </div>
-        </section>
-      `;
+  function formatDate(raw){
+    if(!raw)return "";
+    const d=new Date(raw+"T12:00:00");
+    return Number.isNaN(d.getTime())?String(raw):
+      d.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+  }
+  function ratingOf(item){
+    const raw=item?.averageRating??item?.calculatedRating??item?.rating;
+    if(raw==null||raw==="")return null;
+    const n=Number(raw);return Number.isFinite(n)?clamp(n,0,10):null;
+  }
+  function ratingMarkup(value){
+    if(value==null)return `<span class="rating-unrated">Not rated yet</span>`;
+    const stars=Array.from({length:10},(_,i)=>{
+      const portion=clamp(value-i,0,1);
+      return `<span class="rating-star"><svg viewBox="0 0 24 24"
+        aria-hidden="true"><defs><linearGradient id="rate-${i}">
+        <stop offset="${Math.round(portion*100)}%" stop-color="#d9d0ff"/>
+        <stop offset="${Math.round(portion*100)}%" stop-color="#35344c"/>
+        </linearGradient></defs><path fill="url(#rate-${i})"
+        d="m12 2 3.09 6.26 6.91 1.01-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01z"/>
+        </svg></span>`;
     }).join("");
-
-    openEditor(`
-      <p>Create the structure of your archive.
-      All changes are saved automatically.</p>
-
-      <div class="manager-actions">
-        <button class="soft-button primary-button"
-          data-new="group">+ Group</button>
-        <button class="soft-button primary-button"
-          data-new="production">+ Production</button>
-        <button class="soft-button"
-          data-new="season">+ Season</button>
-        <button class="soft-button"
-          data-new="episode">+ Episode</button>
-      </div>
-
-      ${sections}
-    `);
-
-    $$("#editorContent [data-new]").forEach(el=>{
-      el.onclick=()=>openEntityForm(el.dataset.new);
-    });
-
-    $$("#editorContent [data-edit]").forEach(el=>{
-      el.onclick=()=>openEntityForm(
-        el.dataset.edit,el.dataset.id
-      );
-    });
-
-    $$("#editorContent [data-up]").forEach(el=>{
-      el.onclick=()=>{
-        moveOrder(el.dataset.up,el.dataset.id,-1);
-        openManager();
-      };
-    });
-
-    $$("#editorContent [data-down]").forEach(el=>{
-      el.onclick=()=>{
-        moveOrder(el.dataset.down,el.dataset.id,1);
-        openManager();
-      };
-    });
-
-    $$("#editorContent [data-delete]").forEach(el=>{
-      el.onclick=()=>{
-        const type=el.dataset.delete;
-        const item=getEntity(type,el.dataset.id);
-
-        confirmAction(
-          `Delete "${titleOf(item)}" and all its descendants? This cannot be undone.`,
-          ()=>{
-            deleteEntity(type,el.dataset.id);
-            openManager();
-          }
-        );
-      };
-    });
+    return `<span class="rating-stars">${stars}</span>
+      <span class="rating-value">${value.toFixed(1)} / 10</span>`;
   }
-
-  /* ======================================================
-     EDITING FORMS
-  ====================================================== */
-
-  function optionList(items,selected) {
-    return items.map(item=>`
-      <option value="${escapeHTML(item.id)}"
-        ${String(item.id)===String(selected)?"selected":""}>
-        ${escapeHTML(item.title || item.name)}
-      </option>
-    `).join("");
-  }
-
-  function genreCheckboxes(type,ids=[]) {
-    return genreCollection(type).map(g=>`
-      <label class="field-checkbox">
-        <input type="checkbox"
-          data-genre="${type}"
-          value="${escapeHTML(g.id)}"
-          ${ids.includes(g.id)?"checked":""}>
-        ${escapeHTML(g.name)}
-      </label>
-    `).join("") || `<small>No genres created yet.</small>`;
-  }
-
-  function formField(id,label,value="",type="text") {
-    return `
-      <div class="form-field">
-        <label for="field-${id}">${label}</label>
-        <input id="field-${id}" class="form-input"
-          type="${type}" value="${escapeHTML(value ?? "")}">
-      </div>
-    `;
-  }
-
-  function selectField(id,label,options,value) {
-    return `
-      <div class="form-field">
-        <label for="field-${id}">${label}</label>
-        <select id="field-${id}" class="form-select">
-          ${options.map(opt=>`
-            <option value="${escapeHTML(opt.value)}"
-              ${String(opt.value)===String(value)?"selected":""}>
-              ${escapeHTML(opt.label)}
-            </option>
-          `).join("")}
-        </select>
-      </div>
-    `;
-  }
-
-  function openEntityForm(type,id=null,parentId=null) {
-    const existing=id?getEntity(type,id):null;
-    const data=existing || {};
-
-    if (id&&!existing) {
-      notify("Entry not found.");
-      openManager();
+  let pageRenderToken=0;
+  async function updatePageBanner(record){
+    const token=++pageRenderToken;
+    if(pageImageURL){URL.revokeObjectURL(pageImageURL);pageImageURL=null;}
+    let url=null;
+    try{
+      if(record.bannerImageId){
+        const blob=await imageOp("get",record.bannerImageId);
+        if(blob)url=URL.createObjectURL(blob);
+      }
+      if(!url&&record.banner)url=record.banner;
+    }catch(e){console.warn("Banner unavailable",e);}
+    if(token!==pageRenderToken||!pageEl.classList.contains("open")){
+      if(url?.startsWith("blob:"))URL.revokeObjectURL(url);
       return;
     }
+    if(url?.startsWith("blob:"))pageImageURL=url;
+    const banner=$("#pageBanner");
+    banner.classList.toggle("is-empty",!url);
+    banner.style.backgroundImage=url?`url(${JSON.stringify(url)})`:"";
+    banner.style.backgroundPosition=
+      `${record.bannerPositionX??50}% ${record.bannerPositionY??35}%`;
+    banner.style.opacity=(record.bannerOpacity??D.images.defaultOpacity)/100;
+  }
+  function openPage(t,key,{replace=false}={}){
+    if(!["group","production"].includes(t))return;
+    const entry=pageRecord(t,key);
+    if(!entry)return toast("Entry not found.");
+    if(page&&!replace)pageStack.push({type:page.type,id:page.id});
+    page={type:t,id:key,demo:entry.demo};
+    const r=entry.record,config=D.detailPages[t];
+    pageEl.classList.add("open");
+    pageEl.setAttribute("aria-hidden","false");
+    viewport.inert=true;
+    $("#archivePage").scrollTop=0;
+    $("#pageTitle").textContent=title(r);
+    $("#pageType").textContent=t==="group"?"COLLECTION":
+      (r.mediaType||"PRODUCTION").toUpperCase();
+    $("#pageRating").innerHTML=ratingMarkup(ratingOf(r));
+    $("#pageMainGenres").textContent=genreNames(r,"main").join(" · ");
+    $("#pageSecondaryGenres").textContent=genreNames(r,"secondary").join(" · ");
+    $("#pageTaxonomy")?.classList?.toggle("is-empty",false);
+    $("#pageNotes").textContent=r.notes||"";
+    $("#pageNotes").classList.toggle("is-empty",!r.notes);
+    const meta=[];
+    if(t==="production"){
+      if(r.mediaType)meta.push(r.mediaType);
+      if(r.releaseStart||r.releaseEnd)
+        meta.push([formatDate(r.releaseStart),formatDate(r.releaseEnd)]
+          .filter(Boolean).join(" — "));
+    }
+    $("#pageQuickMeta").innerHTML=meta.map(m=>
+      `<span>${esc(m)}</span>`).join("");
+    const clip=$("#statusPaperclip");
+    clip.hidden=t!=="production";
+    if(t==="production"){
+      clip.dataset.status=(D.statusVisuals[r.status]?.key||"planned");
+      clip.setAttribute("aria-label",`Status: ${r.status||"Planned"}`);
+    }
+    $("#pageEditButton").hidden=entry.demo;
+    const childType=config.childType,list=pageChildren(t,r,entry.demo);
+    $("#pageChildrenCount").textContent=
+      `${list.length} ${t==="group"?"PRODUCTIONS":"SEASONS"}`;
+    $("#pageAddChildButton").hidden=entry.demo;
+    const container=$("#pageChildren");
+    container.className=`page-children is-${t}`;
+    if(!list.length){
+      container.innerHTML=`<div class="page-children-empty">
+        No ${t==="group"?"productions":"seasons"} yet.</div>`;
+    }else if(t==="group"){
+      container.innerHTML=list.map(ch=>`
+        <button class="child-production" data-child="${esc(ch.id)}">
+          <span class="child-production-image" data-img="${esc(ch.id)}"></span>
+          <span class="child-production-shade"></span>
+          <span class="child-production-title">${esc(title(ch))}</span>
+          <span class="child-production-meta">
+            ${esc(ch.mediaType||"Production")}
+            ${ch.status?" · "+esc(ch.status):""}
+          </span>
+        </button>`).join("");
+      list.forEach(async ch=>{
+        const target=[...container.querySelectorAll("[data-img]")]
+          .find(el=>el.dataset.img===String(ch.id));
+        if(!target)return;
+        try{
+          const url=ch.bannerImageId?await imageURL(ch.bannerImageId):ch.banner;
+          if(target.isConnected&&url)target.style.backgroundImage=
+            `url(${JSON.stringify(url)})`;
+        }catch(e){console.warn(e);}
+      });
+    }else{
+      container.innerHTML=list.map(ch=>`
+        <button class="child-season" data-child="${esc(ch.id)}">
+          <span class="child-season-title">${esc(title(ch))}</span>
+          <span class="child-season-right">
+            ${ch.releaseStart?esc(formatDate(ch.releaseStart)):""}
+            <span>›</span>
+          </span>
+        </button>`).join("");
+    }
+    container.querySelectorAll("[data-child]").forEach(b=>{
+      b.onclick=()=>{
+        const key=b.dataset.child,node=byId.get(key);
+        if(node)focus(node);
+        if(childType==="production")openPage("production",key);
+        else{
+          closePage();
+          toast("Season pages arrive in Step 5.");
+        }
+      };
+    });
+    updatePageBanner(r);
+    $("#archivePage").focus({preventScroll:true});
+  }
+  function closePage(){
+    ++pageRenderToken;
+    page=null;pageStack=[];
+    pageEl.classList.remove("open");
+    pageEl.setAttribute("aria-hidden","true");
+    if(pageImageURL){URL.revokeObjectURL(pageImageURL);pageImageURL=null;}
+    viewport.inert=!!overlay;
+  }
+  function pageBack(){
+    const prior=pageStack.pop();
+    if(prior)openPage(prior.type,prior.id,{replace:true});
+    else closePage();
+  }
 
-    const title=existing
-      ? `Edit ${type}`
-      : `Create ${type}`;
-
+  /* Editing */
+  function createGenre(t,name){
+    const clean=name.trim(),list=genreList(t);
+    if(!clean)return false;
+    if(list.some(g=>g.name.toLowerCase()===clean.toLowerCase()))
+      return toast("That genre already exists."),false;
+    list.push({id:id(),name:clean,createdAt:new Date().toISOString()});
+    return commit("Genre created.");
+  }
+  function genreManager(){
+    detail(`<span class="detail-eyebrow">PERSONAL CATEGORIES</span>
+      <h2 id="detailTitle">Genre Creation</h2>
+      <p>Create your own main genres and secondary tags.</p>
+      ${["main","secondary"].map(t=>`
+        <h3>${t==="main"?"Main Genres":"Secondary Genres & Tags"}</h3>
+        <div class="genre-create-row">
+          <input id="genre-${t}" class="form-input" placeholder="New name...">
+          <button class="soft-button primary-button" data-add-genre="${t}">Add</button>
+        </div><div class="genre-list" id="list-${t}"></div>`).join("")}`);
+    for(const t of ["main","secondary"]){
+      const draw=()=>{
+        const el=$("#list-"+t),list=genreList(t);
+        el.replaceChildren();
+        if(!list.length){el.innerHTML=`<p class="genre-empty">None created yet.</p>`;return;}
+        for(const g of list){
+          const chip=document.createElement("span");
+          chip.className="genre-chip";
+          const label=document.createElement("span");label.textContent=g.name;
+          const edit=document.createElement("button");edit.textContent="✎";
+          const del=document.createElement("button");del.textContent="×";
+          edit.onclick=()=>{
+            const newName=prompt("Rename genre",g.name)?.trim();
+            if(!newName)return;
+            if(list.some(x=>x.id!==g.id&&x.name.toLowerCase()===newName.toLowerCase()))
+              return toast("Name already in use.");
+            g.name=newName;commit("Genre renamed.");draw();
+          };
+          del.onclick=()=>ask(`Delete "${g.name}" and remove its assignments?`,()=>{
+            list.splice(list.indexOf(g),1);
+            const field=t==="main"?"mainGenreIds":"secondaryGenreIds";
+            for(const kind of ["group","production"])
+              for(const r of collection(kind))
+                r[field]=(r[field]||[]).filter(x=>x!==g.id);
+            commit("Genre deleted.");draw();
+          });
+          chip.append(label,edit,del);el.append(chip);
+        }
+      };
+      draw();
+      const input=$("#genre-"+t);
+      const add=()=>{if(createGenre(t,input.value)){input.value="";draw();}};
+      $(`[data-add-genre="${t}"]`).onclick=add;
+      input.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();add();}};
+    }
+  }
+  function removeDeep(t,key){
+    for(const ch of children(t,key))removeDeep(nextType[t],ch.id);
+    const list=collection(t),index=list.findIndex(e=>String(e.id)===String(key));
+    if(index>=0){
+      const img=list[index].bannerImageId;
+      list.splice(index,1);
+      if(img)deleteUnusedImage(img);
+    }
+  }
+  function reorder(t,key,delta){
+    const r=find(t,key);if(!r)return;
+    const siblings=collection(t).filter(e=>!parents[t]||
+      String(e[parents[t]]||"")===String(r[parents[t]]||""))
+      .sort((a,b)=>(a.order??0)-(b.order??0));
+    const i=siblings.indexOf(r),j=i+delta;
+    if(j<0||j>=siblings.length)return;
+    [siblings[i],siblings[j]]=[siblings[j],siblings[i]];
+    siblings.forEach((e,i)=>e.order=i);
+    commit("Order updated.");manager();
+  }
+  function manager(){
+    const panels=types.map(t=>{
+      const arr=collection(t).slice().sort((a,b)=>(a.order??0)-(b.order??0));
+      return `<section class="manager-section">
+        <div class="manager-section-title"><h3>${t[0].toUpperCase()+t.slice(1)}s</h3>
+        <span class="manager-count">${arr.length}</span></div>
+        <div class="manager-list">${arr.length?arr.map(r=>`
+          <div class="manager-item">
+            <div class="manager-item-main"><span class="manager-item-title">
+              ${esc(title(r))}</span><span class="manager-item-subtitle">
+              ${esc(parentName(t,r)|| (t==="production"?"Standalone":""))}</span></div>
+            <div class="manager-item-actions">
+              <button class="mini-button" data-edit="${t}" data-key="${esc(r.id)}">✎</button>
+              <button class="mini-button" data-up="${t}" data-key="${esc(r.id)}">↑</button>
+              <button class="mini-button" data-down="${t}" data-key="${esc(r.id)}">↓</button>
+              <button class="mini-button" data-del="${t}" data-key="${esc(r.id)}">×</button>
+            </div></div>`).join(""):`<p class="manager-empty">No entries yet.</p>`}
+          </div></section>`;
+    }).join("");
+    editor(`<p>Build and organize your personal archive.</p>
+      <div class="manager-actions">${types.map(t=>
+        `<button class="soft-button ${t==="group"||t==="production"?"primary-button":""}"
+          data-new="${t}">+ ${t}</button>`).join("")}</div>${panels}`);
+    $$("#editorContent [data-new]").forEach(b=>b.onclick=()=>entityForm(b.dataset.new));
+    $$("#editorContent [data-edit]").forEach(b=>b.onclick=()=>entityForm(b.dataset.edit,b.dataset.key));
+    $$("#editorContent [data-up]").forEach(b=>b.onclick=()=>reorder(b.dataset.up,b.dataset.key,-1));
+    $$("#editorContent [data-down]").forEach(b=>b.onclick=()=>reorder(b.dataset.down,b.dataset.key,1));
+    $$("#editorContent [data-del]").forEach(b=>b.onclick=()=>{
+      const t=b.dataset.del,k=b.dataset.key;
+      ask(`Delete "${title(find(t,k))}" and all its descendants?`,()=>{
+        removeDeep(t,k);commit("Entry deleted.");manager();
+      });
+    });
+  }
+  function inputField(k,label,v="",type="text"){
+    return `<div class="form-field"><label for="field-${k}">${label}</label>
+      <input id="field-${k}" class="form-input" type="${type}"
+      value="${esc(v)}"></div>`;
+  }
+  function selectField(k,label,items,chosen){
+    return `<div class="form-field"><label for="field-${k}">${label}</label>
+      <select id="field-${k}" class="form-select">${items.map(x=>
+      `<option value="${esc(x.id)}" ${String(x.id)===String(chosen)?"selected":""}>
+      ${esc(x.name)}</option>`).join("")}</select></div>`;
+  }
+  function genreFields(kind,chosen=[]){
+    const arr=genreList(kind);
+    return `<div class="form-field"><label>${kind==="main"?"Main Genres":"Secondary Tags"}</label>
+      ${arr.length?arr.map(g=>`<label class="field-checkbox">
+      <input type="checkbox" data-genre="${kind}" value="${esc(g.id)}"
+      ${chosen.includes(g.id)?"checked":""}> ${esc(g.name)}</label>`).join(""):
+      `<small>Create genres using the Genre Creation star.</small>`}</div>`;
+  }
+  async function loadPreview(record){
+    const area=$("#bannerPreview");
+    if(!area)return;
+    let url=null;
+    try{
+      if(record.bannerImageId)url=await imageURL(record.bannerImageId);
+      if(!url)url=record.banner||null;
+    }catch(e){console.warn(e);}
+    if(!area.isConnected)return;
+    area.innerHTML=url?
+      `<img class="banner-preview-image" alt="Current banner">`:
+      `<span class="banner-preview-empty">✧</span>`;
+    if(url)area.querySelector("img").src=url;
+  }
+  function clearPendingImage(){
+    if(previewURL)URL.revokeObjectURL(previewURL);
+    previewURL=null;pendingImage=null;$("#bannerFileInput").value="";
+  }
+  function entityForm(t,key=null,requestedParent=null){
+    clearPendingImage();
+    const old=key?find(t,key):null;
+    if(key&&!old)return toast("Record not found.");
+    const r=old||{},editing=!!old;
+    editorContext={t,key,removeImage:false};
     let html=`<form id="archiveForm" class="archive-form">
-      ${formField("title","Title",data.title || "")}
-    `;
-
-    if (type==="production") {
-      html+=selectField(
-        "groupId","Parent Group",
-        [
-          {value:"",label:"None — standalone production"},
-          ...collection("group").map(g=>({
-            value:g.id,label:g.title
-          }))
-        ],
-        data.groupId || parentId || ""
-      );
-
-      html+=selectField(
-        "mediaType","Form of Media",
-        DATA.mediaTypes.map(v=>({value:v,label:v})),
-        data.mediaType || "TV Series"
-      );
-
-      html+=selectField(
-        "status","Watching Status",
-        DATA.statuses.map(v=>({value:v,label:v})),
-        data.status || "Planned"
-      );
-
-      html+=`
-        <label class="field-checkbox">
-          <input type="checkbox" id="field-watchlist"
-            ${data.watchlist?"checked":""}>
-          Add to Watchlist
-        </label>
-      `;
+      ${inputField("title","Title",r.title||"")}`;
+    if(t==="production"){
+      html+=selectField("groupId","Group",[
+        {id:"",name:"None — standalone"},...collection("group").map(e=>({id:e.id,name:title(e)}))
+      ],r.groupId||requestedParent||"");
+      html+=selectField("mediaType","Media Format",D.mediaTypes.map(x=>({id:x,name:x})),
+        r.mediaType||"TV Series");
+      html+=selectField("status","Watching Status",D.statuses.map(x=>({id:x,name:x})),
+        r.status||"Planned");
+      html+=`<label class="field-checkbox"><input type="checkbox"
+        id="field-watchlist" ${r.watchlist?"checked":""}> Watchlist</label>`;
     }
-
-    if (type==="season") {
-      html+=selectField(
-        "productionId","Production",
-        collection("production").map(p=>({
-          value:p.id,label:p.title
-        })),
-        data.productionId || parentId || ""
-      );
-
-      html+=selectField(
-        "status","Watching Status",
-        DATA.statuses.map(v=>({value:v,label:v})),
-        data.status || "Planned"
-      );
+    if(t==="season"){
+      html+=selectField("productionId","Production",
+        collection("production").map(e=>({id:e.id,name:title(e)})),
+        r.productionId||requestedParent||"");
+      html+=selectField("status","Watching Status",
+        D.statuses.map(x=>({id:x,name:x})),r.status||"Planned");
     }
-
-    if (type==="episode") {
-      html+=selectField(
-        "seasonId","Season",
-        collection("season").map(s=>({
-          value:s.id,label:s.title
-        })),
-        data.seasonId || parentId || ""
-      );
-
-      html+=formField(
-        "duration","Duration (minutes)",
-        data.duration ?? "", "number"
-      );
+    if(t==="episode"){
+      html+=selectField("seasonId","Season",
+        collection("season").map(e=>({id:e.id,name:title(e)})),
+        r.seasonId||requestedParent||"");
+      html+=inputField("duration","Duration (minutes)",r.duration??"","number");
     }
-
-    if (type==="group" || type==="production") {
-      html+=`
-        <div class="form-field">
-          <label>Main Genres</label>
-          ${genreCheckboxes("main",data.mainGenreIds || [])}
+    if(t==="group"||t==="production"){
+      html+=genreFields("main",r.mainGenreIds||"");
+      html+=genreFields("secondary",r.secondaryGenreIds||"");
+      html+=`<div class="form-field banner-upload">
+        <label>Banner Image</label>
+        <div class="banner-upload-preview" id="bannerPreview"></div>
+        <div class="banner-upload-actions">
+          <button type="button" class="soft-button" id="chooseBanner">
+            Choose from Gallery</button>
+          <button type="button" class="soft-button" id="removeBanner">
+            Remove Image</button>
         </div>
-        <div class="form-field">
-          <label>Secondary Genres & Tags</label>
-          ${genreCheckboxes("secondary",data.secondaryGenreIds || [])}
-        </div>
-      `;
-
-      html+=formField(
-        "banner","Banner Image URL (optional)",
-        data.banner || "","url"
-      );
-    }
-
-    if (type==="production" || type==="season") {
-      html+=`<div class="form-grid">
-        ${formField("releaseStart","Airing / Release Start",
-          data.releaseStart || "","date")}
-        ${formField("releaseEnd","Airing / Release End",
-          data.releaseEnd || "","date")}
-      </div>`;
-    }
-
-    if (type==="production" || type==="episode") {
-      html+=formField(
-        "lastWatched",
-        type==="episode"?"Date Watched":"Last Watched",
-        data.lastWatched || data.watchedAt || "",
-        "date"
-      );
-    }
-
-    html+=`
-      <div class="form-field">
-        <label for="field-notes">Personal Observations</label>
-        <textarea id="field-notes"
-          class="form-textarea"></textarea>
-      </div>
-
-      <div class="form-actions">
-        <button type="button" class="soft-button"
-          id="cancelForm">Cancel</button>
-        <button type="submit"
-          class="soft-button primary-button">
-          ${existing?"Save Changes":"Create Entry"}
-        </button>
-      </div>
-    </form>`;
-
-    openEditor(html,title.toUpperCase(),"ARCHIVE EDITOR");
-
-    $("#field-notes").value=data.notes || "";
-
-    $("#cancelForm").onclick=openManager;
-
-    $("#archiveForm").addEventListener("submit",event=>{
-      event.preventDefault();
-
-      const get=name =>
-        $("#field-"+name)?.value || "";
-
-      const values={
-        title:get("title").trim(),
-        notes:$("#field-notes").value
-      };
-
-      if (type==="production") {
-        values.groupId=get("groupId") || null;
-        values.mediaType=get("mediaType");
-        values.status=get("status");
-        values.watchlist=$("#field-watchlist").checked;
-      }
-
-      if (type==="season") {
-        values.productionId=get("productionId");
-        values.status=get("status");
-      }
-
-      if (type==="episode") {
-        values.seasonId=get("seasonId");
-        values.duration=Math.max(0,Number(get("duration"))||0);
-        values.watchedAt=get("lastWatched");
-      }
-
-      if (type==="group" || type==="production") {
-        values.banner=get("banner");
-
-        values.mainGenreIds=
-          $$('#archiveForm [data-genre="main"]:checked')
-            .map(input=>input.value);
-
-        values.secondaryGenreIds=
-          $$('#archiveForm [data-genre="secondary"]:checked')
-            .map(input=>input.value);
-      }
-
-      if (type==="production" || type==="season") {
-        values.releaseStart=get("releaseStart");
-        values.releaseEnd=get("releaseEnd");
-      }
-
-      if (type==="production") {
-        values.lastWatched=get("lastWatched");
-      }
-
-      const success=existing
-        ? updateEntity(type,id,values)
-        : createEntity(type,values);
-
-      if (success) openManager();
-    });
-  }
-
-  /* ======================================================
-     DETAILS & NAVIGATION
-  ====================================================== */
-
-  function selectStar(node) {
-    if (node.type==="navigation") {
-      switch(node.action) {
-        case "create":
-          openManager();
-          return;
-        case "genres":
-          openGenreManager();
-          return;
-        case "settings":
-          openSettings();
-          return;
-        case "library":
-        case "watchlist":
-          openCollection(node.action);
-          return;
-      }
-    }
-
-    focusNode(node);
-
-    if (node.type==="episode") {
-      openRecordDetails(node);
-    }
-  }
-
-  function openRecordDetails(node) {
-    const record=node.record || {};
-
-    const type=node.type;
-
-    const genres=[
-      ...(record.mainGenreIds || []).map(id=>genreName(id,"main")),
-      ...(record.secondaryGenreIds || []).map(id=>genreName(id,"secondary"))
-    ].filter(Boolean);
-
-    openDetail(`
-      <span class="detail-eyebrow">${escapeHTML(type)}</span>
-      <h2 id="detailTitle">${escapeHTML(node.title)}</h2>
-
-      ${genres.length?`<p>${escapeHTML(genres.join(" · "))}</p>`:""}
-
-      <p>${escapeHTML(record.notes || "")}</p>
-
-      ${!node.demo?`
-        <button class="detail-action" id="editRecordButton">
-          Edit Entry
-        </button>
-      `:"<p>Demonstration record</p>"}
-    `);
-
-    if (!node.demo) {
-      $("#editRecordButton").onclick=()=>{
-        openEntityForm(type,node.id);
-      };
-    }
-  }
-
-  function openCollection(type) {
-    activeCollection=type;
-    filters={query:"",sort:"alphabetical",status:""};
-
-    openDetail(`
-      <span class="detail-eyebrow">YOUR ARCHIVE</span>
-      <h2 id="detailTitle">
-        ${type==="library"?"Library":"Watchlist"}
-      </h2>
-
-      <div class="library-toolbar">
-        <div class="library-control">
-          <label for="librarySearch">Search</label>
-          <input class="library-input" id="librarySearch"
-            placeholder="Title...">
-        </div>
-
-        <div class="library-control">
-          <label for="librarySort">Sort</label>
-          <select class="library-select" id="librarySort">
-            ${DATA.sorting.map(s=>`
-              <option value="${s.id}">${s.title}</option>
-            `).join("")}
-          </select>
-        </div>
-      </div>
-
-      <div class="library-count" id="libraryCount"></div>
-      <div class="library-results" id="libraryResults"></div>
-    `);
-
-    $("#librarySearch").oninput=e=>{
-      filters.query=e.target.value;
-      renderLibrary();
-    };
-
-    $("#librarySort").onchange=e=>{
-      filters.sort=e.target.value;
-      renderLibrary();
-    };
-
-    renderLibrary();
-  }
-
-  function renderLibrary() {
-    let items=collection("production").slice();
-
-    if (activeCollection==="watchlist") {
-      items=items.filter(i=>
-        i.watchlist || i.status==="Planned"
-      );
-    }
-
-    if (filters.query) {
-      const q=filters.query.toLowerCase();
-      items=items.filter(i=>titleOf(i).toLowerCase().includes(q));
-    }
-
-    const sort=filters.sort;
-
-    const rating=i=>{
-      const n=Number(i.averageRating ?? i.rating);
-      return Number.isFinite(n)?n:null;
-    };
-
-    items.sort((a,b)=>{
-      switch(sort) {
-        case "alphabeticalReverse":
-          return titleOf(b).localeCompare(titleOf(a));
-        case "highestRated":
-          return (rating(b)??-1)-(rating(a)??-1);
-        case "lowestRated":
-          return (rating(a)??999)-(rating(b)??999);
-        case "newestAdded":
-          return dateValue(b.createdAt)-dateValue(a.createdAt);
-        case "oldestAdded":
-          return dateValue(a.createdAt)-dateValue(b.createdAt);
-        case "lastWatched":
-          return dateValue(b.lastWatched)-dateValue(a.lastWatched);
-        case "earliestRelease":
-          return dateValue(a.releaseStart)-dateValue(b.releaseStart);
-        case "latestRelease":
-          return dateValue(b.releaseStart)-dateValue(a.releaseStart);
-        case "custom":
-          return (a.order??0)-(b.order??0);
-        default:
-          return titleOf(a).localeCompare(titleOf(b));
-      }
-    });
-
-    $("#libraryCount").textContent=
-      `${items.length} production${items.length===1?"":"s"}`;
-
-    $("#libraryResults").innerHTML=items.length
-      ? items.map(item=>`
-          <button class="library-entry"
-            data-library-id="${escapeHTML(item.id)}">
-            <span class="library-entry-main">
-              <span class="library-entry-title">
-                ${escapeHTML(titleOf(item))}
-              </span>
-              <span class="library-entry-meta">
-                ${escapeHTML(item.mediaType || "Production")}
-              </span>
-            </span>
-          </button>
-        `).join("")
-      : `<div class="library-empty">
-          <h3>Nothing here yet.</h3>
-          <p>Create your first production through
-          the Create & Edit constellation star.</p>
+        <span class="banner-upload-note">
+          Images are stored privately on this device. Export a backup to transfer them.
+        </span></div>
+        <div class="form-grid">
+          ${inputField("bannerPositionX","Image Position — Horizontal (%)",
+            r.bannerPositionX??50,"number")}
+          ${inputField("bannerPositionY","Image Position — Vertical (%)",
+            r.bannerPositionY??35,"number")}
         </div>`;
-
-    $$("[data-library-id]").forEach(el=>{
-      el.onclick=()=>{
-        const node=nodeMap.get(el.dataset.libraryId);
-        closeOverlay();
-        if (node) focusNode(node);
+    }
+    if(t==="production"||t==="season"){
+      html+=`<div class="form-grid">
+        ${inputField("releaseStart","Airing / Release Start",r.releaseStart||"","date")}
+        ${inputField("releaseEnd","Airing / Release End",r.releaseEnd||"","date")}
+        </div>`;
+    }
+    if(t==="production"||t==="episode")
+      html+=inputField("lastWatched",t==="episode"?"Date Watched":"Last Watched",
+        r.lastWatched||r.watchedAt||"","date");
+    html+=`<div class="form-field">
+      <label for="field-notes">Personal Observations</label>
+      <textarea id="field-notes" class="form-textarea"></textarea></div>
+      <div class="form-actions">
+        <button type="button" class="soft-button" id="cancelForm">Cancel</button>
+        <button type="submit" class="soft-button primary-button" id="saveForm">
+          ${editing?"Save Changes":"Create Entry"}</button>
+      </div></form>`;
+    editor(html,`${editing?"Edit":"Create"} ${t}`);
+    $("#field-notes").value=r.notes||"";
+    $("#cancelForm").onclick=()=>{clearPendingImage();manager();};
+    if(t==="group"||t==="production"){
+      loadPreview(r);
+      $("#chooseBanner").onclick=()=>$("#bannerFileInput").click();
+      $("#removeBanner").onclick=()=>{
+        clearPendingImage();editorContext.removeImage=true;
+        $("#bannerPreview").innerHTML=`<span class="banner-preview-empty">✧</span>`;
       };
+    }
+    $("#archiveForm").onsubmit=async e=>{
+      e.preventDefault();
+      const get=k=>$("#field-"+k)?.value||"";
+      const value={title:get("title").trim(),notes:$("#field-notes").value};
+      if(!value.title)return toast("Enter a title.");
+      if(t==="production"){
+        value.groupId=get("groupId")||null;
+        value.mediaType=get("mediaType");
+        value.status=get("status");
+        value.watchlist=$("#field-watchlist").checked;
+      }
+      if(t==="season"){
+        value.productionId=get("productionId");
+        value.status=get("status");
+      }
+      if(t==="episode"){
+        value.seasonId=get("seasonId");
+        value.duration=Math.max(0,Number(get("duration"))||0);
+        value.watchedAt=get("lastWatched");
+      }
+      if(t==="group"||t==="production"){
+        value.mainGenreIds=$$('#archiveForm [data-genre="main"]:checked')
+          .map(x=>x.value);
+        value.secondaryGenreIds=$$('#archiveForm [data-genre="secondary"]:checked')
+          .map(x=>x.value);
+        value.bannerPositionX=clamp(+get("bannerPositionX")||50,0,100);
+        value.bannerPositionY=clamp(+get("bannerPositionY")||35,0,100);
+      }
+      if(t==="production"||t==="season"){
+        value.releaseStart=get("releaseStart");
+        value.releaseEnd=get("releaseEnd");
+      }
+      if(t==="production")value.lastWatched=get("lastWatched");
+      if(t==="season"&&!find("production",value.productionId))
+        return toast("Create a production first.");
+      if(t==="episode"&&!find("season",value.seasonId))
+        return toast("Create a season first.");
+      const button=$("#saveForm");button.disabled=true;
+      let newKey=null,previousImage=old?.bannerImageId||null;
+      try{
+        if(pendingImage&&(t==="group"||t==="production")){
+          newKey=id();await imageOp("put",newKey,pendingImage);
+          value.bannerImageId=newKey;value.banner="";
+        }else if(editorContext.removeImage){
+          value.bannerImageId=null;value.banner="";
+        }
+        if(editing){
+          const previousParent=old[parents[t]]||null;
+          const newParent=value[parents[t]]||null;
+          if(previousParent!==newParent){
+            value.order=order(t,newParent);
+            delete old.mapX;delete old.mapY;
+          }
+          Object.assign(old,value,{id:old.id,
+            createdAt:old.createdAt,updatedAt:new Date().toISOString()});
+        }else{
+          const time=new Date().toISOString();
+          collection(t).push({id:id(),createdAt:time,updatedAt:time,
+            order:order(t,value[parents[t]]),...value});
+        }
+        if(!save())throw Error("Archive storage failed.");
+        buildWorld();
+        clearPendingImage();
+        if(previousImage&&previousImage!==value.bannerImageId)
+          await deleteUnusedImage(previousImage);
+        if(page && page.type===t && page.id===key)
+          openPage(t,key,{replace:true});
+        toast(editing?"Changes saved.":"Entry created.");
+        manager();
+      }catch(error){
+        console.error(error);
+        if(newKey)await deleteUnusedImage(newKey);
+        toast("Could not save. Check available storage.");
+      }finally{if(button.isConnected)button.disabled=false;}
+    };
+  }
+
+  /* Library and Search */
+  function openCollection(t){
+    collectionType=t;filters={q:"",sort:"alphabetical"};
+    detail(`<span class="detail-eyebrow">YOUR ARCHIVE</span>
+      <h2 id="detailTitle">${t==="library"?"Library":"Watchlist"}</h2>
+      <div class="library-toolbar">
+        <div class="library-control"><label>Search</label>
+          <input class="library-input" id="libSearch" placeholder="Title..."></div>
+        <div class="library-control"><label>Sort</label>
+          <select class="library-select" id="libSort">${D.sorting.map(s=>
+            `<option value="${s.id}">${esc(s.title)}</option>`).join("")}</select></div>
+      </div><div class="library-count" id="libCount"></div>
+      <div class="library-results" id="libResults"></div>`);
+    $("#libSearch").oninput=e=>{filters.q=e.target.value;renderCollection();};
+    $("#libSort").onchange=e=>{filters.sort=e.target.value;renderCollection();};
+    renderCollection();
+  }
+  function renderCollection(){
+    let arr=collection("production").filter(e=>collectionType!=="watchlist"||
+      e.watchlist||e.status==="Planned");
+    const q=filters.q.toLowerCase();
+    arr=arr.filter(e=>title(e).toLowerCase().includes(q));
+    const rating=e=>ratingOf(e);
+    arr.sort((a,b)=>{
+      const alpha=title(a).localeCompare(title(b));
+      switch(filters.sort){
+        case "alphabeticalReverse":return -alpha;
+        case "highestRated":return (rating(b)??-1)-(rating(a)??-1)||alpha;
+        case "lowestRated":return (rating(a)??999)-(rating(b)??999)||alpha;
+        case "newestAdded":return dateNumber(b.createdAt)-dateNumber(a.createdAt)||alpha;
+        case "oldestAdded":return dateNumber(a.createdAt)-dateNumber(b.createdAt)||alpha;
+        case "lastWatched":return dateNumber(b.lastWatched)-dateNumber(a.lastWatched)||alpha;
+        case "earliestRelease":return dateNumber(a.releaseStart)-dateNumber(b.releaseStart)||alpha;
+        case "latestRelease":return dateNumber(b.releaseStart)-dateNumber(a.releaseStart)||alpha;
+        case "custom":return (a.order??0)-(b.order??0)||alpha;
+        default:return alpha;
+      }
+    });
+    $("#libCount").textContent=`${arr.length} productions`;
+    $("#libResults").innerHTML=arr.length?arr.map(e=>
+      `<button class="library-entry" data-production="${esc(e.id)}">
+        <span class="library-entry-main">
+        <span class="library-entry-title">${esc(title(e))}</span>
+        <span class="library-entry-meta">${esc(e.mediaType||"Production")}</span>
+        </span><span class="library-entry-rating">
+        ${rating(e)==null?"—":rating(e).toFixed(1)+" / 10"}</span>
+        </button>`).join(""):`<div class="library-empty">
+        <h3>Nothing here yet.</h3><p>Add productions using Create & Edit.</p></div>`;
+    $$("#libResults [data-production]").forEach(b=>b.onclick=()=>{
+      const n=byId.get(b.dataset.production);hide();
+      if(n){focus(n);openPage("production",n.id);}
     });
   }
-
-  /* ======================================================
-     GLOBAL SEARCH
-  ====================================================== */
-
-  function openSearch() {
-    $("#globalSearch").value="";
-    $("#searchResults").innerHTML="";
-    showOverlay(searchOverlay);
-    $("#globalSearch").focus();
+  function search(){
+    $("#globalSearch").value="";$("#searchResults").replaceChildren();
+    show(searchEl);$("#globalSearch").focus();
   }
-
-  function renderSearch() {
+  function renderSearch(){
     const q=$("#globalSearch").value.trim().toLowerCase();
     const results=[];
-
-    if (q) {
-      for (const type of TYPES) {
-        for (const item of collection(type)) {
-          if (titleOf(item).toLowerCase().includes(q)) {
-            results.push({type,item});
-          }
-        }
-      }
-    }
-
-    $("#searchResults").innerHTML=results.slice(0,60)
-      .map(({type,item})=>`
-        <button class="search-result"
-          data-search-id="${escapeHTML(item.id)}">
-          <span>${escapeHTML(titleOf(item))}</span>
-          <small>${type}</small>
-        </button>
-      `).join("");
-
-    $$("[data-search-id]").forEach(el=>{
-      el.onclick=()=>{
-        const node=nodeMap.get(el.dataset.searchId);
-        closeOverlay();
-        if (node) focusNode(node);
-      };
+    if(q)for(const t of types)for(const e of collection(t))
+      if(title(e).toLowerCase().includes(q))results.push({t,e});
+    $("#searchResults").innerHTML=results.slice(0,60).map(({t,e})=>
+      `<button class="search-result" data-result="${esc(e.id)}">
+       <span>${esc(title(e))}</span><small>${t}</small></button>`).join("");
+    $$("#searchResults [data-result]").forEach(b=>b.onclick=()=>{
+      const n=byId.get(b.dataset.result);hide();
+      if(n){focus(n);if(["group","production"].includes(n.type))
+        openPage(n.type,n.id);}
     });
   }
-
-  /* ======================================================
-     SETTINGS
-  ====================================================== */
-
-  function openSettings() {
-    const settings=[
-      ["starDensity","Star Density",10],
-      ["starBrightness","Star Brightness",10],
-      ["nebulaIntensity","Nebula Intensity",0],
-      ["constellationGlow","Constellation Glow",0]
-    ];
-
-    openDetail(`
-      <span class="detail-eyebrow">YOUR UNIVERSE</span>
-      <h2 id="detailTitle">Settings</h2>
-
-      ${settings.map(([key,label,min])=>`
-        <div class="detail-row">
-          <label for="setting-${key}">${label}</label>
-          <div>
-            <input id="setting-${key}"
-              class="setting-range" type="range"
-              min="${min}" max="100" step="5"
-              value="${state.settings[key]}">
-            <output class="setting-value"
-              id="value-${key}">${state.settings[key]}</output>
-          </div>
-        </div>
-      `).join("")}
-
-      <div class="detail-row">
-        <label for="setting-motion">Reduce Motion</label>
-        <input type="checkbox" id="setting-motion"
-          class="motion-checkbox"
-          ${state.settings.reduceMotion?"checked":""}>
-      </div>
-
-      <h3>Backups</h3>
-      <p>Your records are saved in this browser.
-      Export backups regularly.</p>
-
-      <button class="detail-action" id="exportArchive">
-        Export Archive
-      </button>
-      <button class="detail-action" id="importArchive">
-        Import Archive
-      </button>
-    `);
-
-    for (const [key] of settings) {
-      $("#setting-"+key).oninput=e=>{
-        state.settings[key]=Number(e.target.value);
-        $("#value-"+key).textContent=e.target.value;
-
-        if (key==="starDensity") rebuildBackgroundStars();
-
-        dirty=true;
-        saveState();
-      };
+  function selectStar(n){
+    if(n.type==="navigation"){
+      switch(n.action){
+        case "create":return manager();
+        case "genres":return genreManager();
+        case "settings":return settings();
+        case "library":case "watchlist":return openCollection(n.action);
+      }
     }
-
-    $("#setting-motion").onchange=e=>{
-      state.settings.reduceMotion=e.target.checked;
-      applyMotion();
-      saveState();
-    };
-
-    $("#exportArchive").onclick=exportBackup;
-    $("#importArchive").onclick=()=>$("#importFile").click();
+    focus(n);
+    if(["group","production"].includes(n.type))openPage(n.type,n.id);
+    else if(n.type==="episode")
+      detail(`<span class="detail-eyebrow">EPISODE</span>
+        <h2 id="detailTitle">${esc(n.title)}</h2>
+        <p>${esc(n.record?.notes||"Episode page arrives in Step 5.")}</p>`);
+  }
+  function settings(){
+    const fields=["starDensity","starBrightness","nebulaIntensity","constellationGlow"];
+    detail(`<span class="detail-eyebrow">YOUR UNIVERSE</span>
+      <h2 id="detailTitle">Settings</h2>${fields.map(k=>
+        `<div class="detail-row"><label>${esc(k)}</label>
+         <input type="range" class="setting-range" data-setting="${k}"
+         min="0" max="100" step="5" value="${state.settings[k]}">
+         <output class="setting-value">${state.settings[k]}</output></div>`).join("")}
+      <div class="detail-row"><label>Reduce Motion</label>
+        <input type="checkbox" class="motion-checkbox" id="reduceMotion"
+        ${state.settings.reduceMotion?"checked":""}></div>
+      <h3>Backups</h3><p>Include uploaded banners when exporting your archive.</p>
+      <button class="detail-action" id="exportBackup">Export archive</button>
+      <button class="detail-action" id="importBackup">Import archive</button>`);
+    $$("[data-setting]").forEach(el=>el.oninput=()=>{
+      state.settings[el.dataset.setting]=+el.value;
+      el.parentElement.querySelector("output").textContent=el.value;
+      if(el.dataset.setting==="starDensity")backgroundBuild();
+      dirty=true;save();
+    });
+    $("#reduceMotion").onchange=e=>{state.settings.reduceMotion=e.target.checked;updateMotion();save();};
+    $("#exportBackup").onclick=exportBackup;
+    $("#importBackup").onclick=()=>$("#importFile").click();
   }
 
-  /* ======================================================
-     BACKUPS
-  ====================================================== */
-
-  function exportBackup() {
-    const backup={
-      app:DATA.appName,
-      schemaVersion:DATA.schemaVersion,
-      exportedAt:new Date().toISOString(),
-      data:state
-    };
-
-    const blob=new Blob(
-      [JSON.stringify(backup,null,2)],
-      {type:"application/json"}
-    );
-
-    const url=URL.createObjectURL(blob);
-    const link=document.createElement("a");
-    link.href=url;
-    link.download="watch-archive-"+
-      new Date().toISOString().slice(0,10)+".json";
-
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-    notify("Backup prepared.");
+  /* Portable JSON with base64 images; no ZIP required. */
+  const blobBase64=blob=>new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result).split(",")[1]);
+    reader.onerror=()=>reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  function base64Blob(base64,type){
+    const raw=atob(base64),parts=[];
+    for(let i=0;i<raw.length;i+=32768){
+      const piece=raw.slice(i,i+32768),bytes=new Uint8Array(piece.length);
+      for(let j=0;j<piece.length;j++)bytes[j]=piece.charCodeAt(j);
+      parts.push(bytes);
+    }
+    return new Blob(parts,{type});
   }
-
-  async function importBackup(file) {
-    if (!file) return;
-
-    try {
+  async function exportBackup(){
+    try{
+      toast("Preparing archive and images...");
+      const images={};
+      const keys=new Set(collection("group").concat(collection("production"))
+        .map(r=>r.bannerImageId).filter(Boolean));
+      for(const key of keys){
+        const blob=await imageOp("get",key);
+        if(blob)images[key]={type:blob.type,data:await blobBase64(blob)};
+      }
+      const backup={app:D.appName,schemaVersion:D.schemaVersion,
+        exportedAt:new Date().toISOString(),data:state,images};
+      const blob=new Blob([JSON.stringify(backup)],{type:"application/json"});
+      const url=URL.createObjectURL(blob),link=document.createElement("a");
+      link.href=url;link.download=`watch-archive-${new Date().toISOString().slice(0,10)}.json`;
+      document.body.append(link);link.click();link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),30000);
+      toast("Backup ready, including banners.");
+    }catch(e){console.error(e);toast("Export failed. Check image storage.");}
+  }
+  async function importBackup(file){
+    if(!file)return;
+    try{
       const backup=JSON.parse(await file.text());
-
-      if (
-        backup.app!==DATA.appName ||
-        backup.schemaVersion!==DATA.schemaVersion ||
-        !backup.data?.archive ||
-        !TYPES.every(t=>
-          Array.isArray(backup.data.archive[COLLECTIONS[t]])
-        )
-      ) throw new Error("Invalid backup");
-
-      if (!confirm(
-        "Replace your existing local archive with this backup? "+
-        "Export your current data first if needed."
-      )) return;
-
-      const previous=state;
-      state=normalizeState(backup.data);
-
-      if (!saveState()) {
-        state=previous;
-        return;
-      }
-
-      closeOverlay();
-      rebuildUniverse();
-      rebuildBackgroundStars();
-      goHome();
-      notify("Archive imported.");
-
-    } catch(e) {
-      console.error(e);
-      notify("Import failed.");
-    } finally {
-      $("#importFile").value="";
-    }
-  }
-
-  /* ======================================================
-     TOUCH, PINCH & PAN
-  ====================================================== */
-
-  function point(e) {
-    return {x:e.clientX,y:e.clientY};
-  }
-
-  function dist(a,b) {
-    return Math.hypot(a.x-b.x,a.y-b.y);
-  }
-
-  function center(a,b) {
-    return {x:(a.x+b.x)/2,y:(a.y+b.y)/2};
-  }
-
-  function startPinch() {
-    if (pointers.size<2) return;
-
-    const [a,b]=[...pointers.values()];
-    const c=center(a,b);
-
-    gesture={
-      kind:"pinch",
-      distance:Math.max(1,dist(a,b)),
-      zoom:camera.zoom,
-      anchor:screenToWorld(c.x,c.y),
-      moved:true
-    };
-
-    blockClickUntil=performance.now()+450;
-  }
-
-  function bindGestures() {
-    viewport.addEventListener("pointerdown",e=>{
-      if (e.pointerType==="mouse"&&e.button!==0) return;
-
-      stopTravel();
-      pointers.set(e.pointerId,point(e));
-
-      if (pointers.size===1) {
-        gesture={kind:"drag",distance:0,moved:false};
-      } else if (pointers.size>=2) {
-        startPinch();
-      }
-    });
-
-    viewport.addEventListener("pointermove",e=>{
-      if (!pointers.has(e.pointerId)) return;
-
-      const old=pointers.get(e.pointerId);
-      const now=point(e);
-
-      pointers.set(e.pointerId,now);
-
-      if (pointers.size>=2) {
-        const [a,b]=[...pointers.values()];
-        if (gesture?.kind!=="pinch") startPinch();
-
-        const c=center(a,b);
-        const zoom=clamp(
-          gesture.zoom*
-          Math.max(1,dist(a,b))/gesture.distance,
-          DATA.camera.minZoom,
-          DATA.camera.maxZoom
-        );
-
-        setCamera(
-          gesture.anchor.x-(c.x-width/2)/zoom,
-          gesture.anchor.y-(c.y-height/2)/zoom,
-          zoom
-        );
-
-        gesture.moved=true;
-        blockClickUntil=performance.now()+400;
-        return;
-      }
-
-      const dx=now.x-old.x;
-      const dy=now.y-old.y;
-
-      gesture.distance+=Math.hypot(dx,dy);
-
-      if (gesture.distance>DATA.camera.tapThreshold) {
-        gesture.moved=true;
-        blockClickUntil=performance.now()+350;
-        viewport.classList.add("dragging");
-
-        if (!viewport.hasPointerCapture(e.pointerId)) {
-          viewport.setPointerCapture(e.pointerId);
+      if(backup.app!==D.appName||backup.schemaVersion!==D.schemaVersion||
+        !backup.data?.archive||!types.every(t=>Array.isArray(
+          backup.data.archive[lists[t]])))throw Error("Invalid backup");
+      if(!confirm("Replace this browser's archive with the imported backup?"))return;
+      const candidate=normalize(backup.data);
+      const old=state;
+      const written=[];
+      try{
+        for(const [key,item] of Object.entries(backup.images||{})){
+          if(!item?.data)continue;
+          await imageOp("put",key,base64Blob(item.data,item.type||"image/jpeg"));
+          written.push(key);
         }
+        state=candidate;
+        if(!save())throw Error("Unable to store archive.");
+      }catch(e){
+        state=old;
+        for(const key of written)if(!(old.archive.groups.concat(old.archive.productions))
+          .some(r=>r.bannerImageId===key))await deleteUnusedImage(key);
+        throw e;
       }
+      hide();closePage();buildWorld();backgroundBuild();goHome();
+      toast("Archive and images imported.");
+    }catch(e){console.error(e);toast("Import failed.");}
+    finally{$("#importFile").value="";}
+  }
 
-      setCamera(
-        camera.x-dx/camera.zoom,
-        camera.y-dy/camera.zoom,
-        camera.zoom
-      );
-    });
-
-    const end=e=>{
-      if (!pointers.has(e.pointerId)) return;
-
-      pointers.delete(e.pointerId);
-
-      if (viewport.hasPointerCapture(e.pointerId)) {
-        viewport.releasePointerCapture(e.pointerId);
-      }
-
-      if (gesture?.moved) {
-        blockClickUntil=performance.now()+350;
-      }
-
-      if (!pointers.size) {
-        gesture=null;
-        viewport.classList.remove("dragging");
-      } else if (pointers.size===1) {
-        gesture={kind:"drag",distance:0,moved:true};
-      }
+  /* Free pan / pinch. */
+  const point=e=>({x:e.clientX,y:e.clientY});
+  const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+  const mid=(a,b)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+  function startPinch(){
+    const [a,b]=[...pointers.values()],center=mid(a,b);
+    gesture={type:"pinch",distance:Math.max(1,distance(a,b)),
+      zoom:camera.z,anchor:world(center.x,center.y),moved:true};
+    suppressUntil=performance.now()+500;
+  }
+  function bindPan(){
+    viewport.onpointerdown=e=>{
+      if(e.pointerType==="mouse"&&e.button!==0)return;
+      flight=null;pointers.set(e.pointerId,point(e));
+      if(pointers.size===1)gesture={type:"drag",travel:0,moved:false};
+      else startPinch();
     };
-
+    viewport.onpointermove=e=>{
+      if(!pointers.has(e.pointerId))return;
+      const before=pointers.get(e.pointerId),now=point(e);
+      pointers.set(e.pointerId,now);
+      if(pointers.size>=2){
+        if(gesture?.type!=="pinch")startPinch();
+        const [a,b]=[...pointers.values()],center=mid(a,b);
+        const z=clamp(gesture.zoom*distance(a,b)/gesture.distance,
+          D.camera.minZoom,D.camera.maxZoom);
+        setCamera(gesture.anchor.x-(center.x-width/2)/z,
+          gesture.anchor.y-(center.y-height/2)/z,z);
+        gesture.moved=true;suppressUntil=performance.now()+450;
+        return;
+      }
+      const dx=now.x-before.x,dy=now.y-before.y;
+      gesture.travel+=Math.hypot(dx,dy);
+      if(gesture.travel>D.camera.tapThreshold){
+        gesture.moved=true;suppressUntil=performance.now()+350;
+        viewport.classList.add("dragging");
+        if(!viewport.hasPointerCapture(e.pointerId))
+          viewport.setPointerCapture(e.pointerId);
+      }
+      setCamera(camera.x-dx/camera.z,camera.y-dy/camera.z,camera.z);
+    };
+    const end=e=>{
+      if(!pointers.has(e.pointerId))return;
+      pointers.delete(e.pointerId);
+      if(viewport.hasPointerCapture(e.pointerId))
+        viewport.releasePointerCapture(e.pointerId);
+      if(gesture?.moved)suppressUntil=performance.now()+350;
+      if(!pointers.size){gesture=null;viewport.classList.remove("dragging");}
+      else if(pointers.size===1)gesture={type:"drag",travel:0,moved:true};
+    };
     viewport.addEventListener("pointerup",end);
     viewport.addEventListener("pointercancel",end);
-
     viewport.addEventListener("click",e=>{
-      if (performance.now()<blockClickUntil) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
+      if(performance.now()<suppressUntil){
+        e.preventDefault();e.stopImmediatePropagation();
       }
     },true);
-
     viewport.addEventListener("wheel",e=>{
       e.preventDefault();
-      zoomAt(
-        e.clientX,e.clientY,
-        Math.exp(-e.deltaY*DATA.camera.wheelSensitivity)
-      );
+      zoomAt(e.clientX,e.clientY,
+        Math.exp(-e.deltaY*D.camera.wheelSensitivity));
     },{passive:false});
   }
-
-  /* ======================================================
-     GLOBAL CONTROLS
-  ====================================================== */
-
-  function bindControls() {
+  function bindControls(){
     $("#homeButton").onclick=goHome;
-
-    $("#focusButton").onclick=()=>{
-      if (focusedNode) focusNode(focusedNode);
-      else goHome();
-    };
-
-    $("#searchButton").onclick=openSearch;
-
-    $("#closeDetailButton").onclick=closeOverlay;
-    $("#detailBackdrop").onclick=closeOverlay;
-
-    $("#closeEditorButton").onclick=closeOverlay;
-    $("#editorBackdrop").onclick=closeOverlay;
-
-    $("#closeSearchButton").onclick=closeOverlay;
-    $("#searchBackdrop").onclick=closeOverlay;
-
+    $("#focusButton").onclick=()=>focused?focus(focused):goHome();
+    $("#searchButton").onclick=search;
+    $("#closeDetailButton").onclick=hide;
+    $("#detailBackdrop").onclick=hide;
+    $("#closeEditorButton").onclick=()=>{clearPendingImage();hide();};
+    $("#editorBackdrop").onclick=()=>{clearPendingImage();hide();};
+    $("#closeSearchButton").onclick=hide;
+    $("#searchBackdrop").onclick=hide;
     $("#globalSearch").oninput=renderSearch;
-
-    $("#cancelConfirmButton").onclick=closeConfirm;
-
-    $("#acceptConfirmButton").onclick=()=>{
-      const action=confirmCallback;
-      closeConfirm();
-      if (action) action();
+    $("#pageCloseButton").onclick=closePage;
+    $("#pageBackButton").onclick=pageBack;
+    $("#pageEditButton").onclick=()=>{
+      if(!page?.demo)entityForm(page.type,page.id);
     };
-
-    $("#importFile").onchange=e=>
-      importBackup(e.target.files?.[0]);
-
+    $("#pageAddChildButton").onclick=()=>{
+      if(page&&!page.demo)entityForm(nextType[page.type],null,page.id);
+    };
+    $("#cancelConfirmButton").onclick=dismissConfirm;
+    $("#acceptConfirmButton").onclick=()=>{
+      const cb=confirmCallback;dismissConfirm();cb?.();
+    };
+    $("#bannerFileInput").onchange=async e=>{
+      const file=e.target.files?.[0];if(!file)return;
+      try{
+        pendingImage=await compressImage(file);
+        editorContext.removeImage=false;
+        if(previewURL)URL.revokeObjectURL(previewURL);
+        previewURL=URL.createObjectURL(pendingImage);
+        const preview=$("#bannerPreview");
+        if(preview)preview.innerHTML=`<img class="banner-preview-image" alt="Selected banner">`;
+        preview?.querySelector("img")?.setAttribute("src",previewURL);
+      }catch(error){console.error(error);toast(error.message||"Unable to read image.");}
+    };
+    $("#importFile").onchange=e=>importBackup(e.target.files?.[0]);
     window.addEventListener("keydown",e=>{
-      if (e.key==="Escape") {
-        if (confirmOverlay.classList.contains("open")) {
-          closeConfirm();
-        } else {
-          closeOverlay();
-        }
+      if(e.key==="Escape"){
+        if(confirmEl.classList.contains("open"))dismissConfirm();
+        else if(overlay)hide();
+        else if(page)pageBack();
       }
     });
-
     let resizeTimer;
-
     window.addEventListener("resize",()=>{
       clearTimeout(resizeTimer);
-
       resizeTimer=setTimeout(()=>{
-        const oldMobile=width<650;
-        const newMobile=innerWidth<650;
-
-        resizeGraphics();
-
-        if (oldMobile!==newMobile) {
-          rebuildUniverse();
-        }
-      },160);
+        const mobile=width<650;
+        resize();if(mobile!==(width<650))buildWorld();
+      },150);
     });
-
     document.addEventListener("visibilitychange",()=>{
-      if (document.hidden) stopLoop();
-      else startLoop();
+      if(document.hidden)stop();else start();
     });
-
-    reduceMedia.addEventListener("change",applyMotion);
-
+    reducedQuery.addEventListener?.("change",updateMotion);
     window.addEventListener("storage",e=>{
-      if (e.key!==DATA.storageKey) return;
-
-      state=loadState();
-      rebuildUniverse();
-      rebuildBackgroundStars();
-      notify("Archive updated from another tab.");
+      if(e.key!==D.storageKey)return;
+      state=load();buildWorld();backgroundBuild();updateMotion();
+      toast("Archive refreshed.");
     });
   }
-
-  /* ======================================================
-     INITIALIZATION
-  ====================================================== */
-
-  function initialize() {
-    applyMotion();
-    resizeGraphics();
-    rebuildUniverse();
-
-    bindGestures();
-    bindControls();
-
-    const start=homeCamera();
-    setCamera(start.x,start.y,start.zoom);
-
-    startLoop();
-
-    if (!localStorage.getItem(DATA.storageKey)) {
-      saveState();
-    }
+  function init(){
+    state=load();updateMotion();resize();buildWorld();bindPan();bindControls();
+    const h=homeTarget();setCamera(h.x,h.y,h.z);
+    start();
+    try{if(!localStorage.getItem(D.storageKey))save();}catch(e){console.warn(e);}
   }
-
-  initialize();
-
+  init();
 })();
